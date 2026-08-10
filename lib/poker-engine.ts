@@ -109,6 +109,7 @@ function handReadyPlayers(state: PokerGameState) {
 export function startHand(state: PokerGameState) {
   state.players = state.players.filter((player) => !player.isKicked);
   state.players.forEach((player) => {
+    player.totalBuyIn ??= state.startingChips;
     const pending = player.pendingRebuy ?? 0;
     if (pending > 0) {
       player.chips += pending;
@@ -118,7 +119,11 @@ export function startHand(state: PokerGameState) {
   });
   let ready = handReadyPlayers(state);
   if (ready.length < 2 && state.players.length >= 2) {
-    state.players.forEach((player) => { player.chips = state.startingChips; });
+    state.players.forEach((player) => {
+      player.chips = state.startingChips;
+      player.totalBuyIn = state.startingChips;
+      player.pendingRebuy = 0;
+    });
     addLog(state, "筹码已重置，新一轮友谊赛开始", "system");
     ready = handReadyPlayers(state);
   }
@@ -572,6 +577,7 @@ export function createInitialState(input: {
     lastSeenAt: now,
     pendingRebuy: 0,
     isKicked: false,
+    totalBuyIn: input.startingChips,
   }];
   const botNames = ["林墨", "Mia", "Leo", "周扬", "陈一凡"];
   for (let index = 0; index < Math.min(input.bots, input.maxPlayers - 1); index += 1) {
@@ -592,6 +598,7 @@ export function createInitialState(input: {
       lastSeenAt: now,
       pendingRebuy: 0,
       isKicked: false,
+      totalBuyIn: input.startingChips,
     });
   }
   const state: PokerGameState = {
@@ -655,6 +662,7 @@ export function addHumanPlayer(state: PokerGameState, user: { id: string; displa
     lastSeenAt: Date.now(),
     pendingRebuy: 0,
     isKicked: false,
+    totalBuyIn: state.startingChips,
   });
   addLog(state, `${user.displayName} 加入了牌桌`, "system");
   if (state.phase === "waiting" && state.players.length >= 2) startHand(state);
@@ -670,6 +678,7 @@ export function requestRebuy(state: PokerGameState, userId: string, requestedAmo
   const available = cap - player.chips - (player.pendingRebuy ?? 0);
   const granted = Math.min(amount, available);
   if (granted <= 0) throw new Error("你的筹码已经达到本桌上限");
+  player.totalBuyIn = (player.totalBuyIn ?? state.startingChips) + granted;
   const handActive = ["preflop", "flop", "turn", "river"].includes(state.phase) && player.hole.length === 2;
   if (handActive) {
     player.pendingRebuy = (player.pendingRebuy ?? 0) + granted;
@@ -710,6 +719,7 @@ export function addBotPlayer(state: PokerGameState, actorId: string) {
     lastSeenAt: Date.now(),
     pendingRebuy: 0,
     isKicked: false,
+    totalBuyIn: state.startingChips,
   };
   state.players.push(bot);
   addLog(state, `房主添加了机器人 ${bot.name}`, "system");

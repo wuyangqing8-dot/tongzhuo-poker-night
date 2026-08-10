@@ -21,6 +21,7 @@ export type GamePlayer = {
   lastSeenAt: number;
   pendingRebuy?: number;
   isKicked?: boolean;
+  totalBuyIn?: number;
 };
 
 export type GameLog = {

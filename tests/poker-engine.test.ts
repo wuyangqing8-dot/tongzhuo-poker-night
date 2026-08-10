@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { potFractionRaiseTarget } from "../lib/bet-sizing";
 import {
   addBotPlayer,
   applyPlayerAction,
@@ -60,6 +61,7 @@ test("rebuy during a hand is queued and applied before the next hand", () => {
   requestRebuy(state, "human-1", 1000);
   const player = state.players.find((item) => item.id === "human-1")!;
   assert.equal(player.pendingRebuy, 1000);
+  assert.equal(player.totalBuyIn, 6000);
   const chipsBefore = player.chips;
   startHand(state);
   assert.equal(player.pendingRebuy, 0);
@@ -73,4 +75,17 @@ test("owner can add and kick a bot", () => {
   assert.equal(state.players.length, count + 1);
   kickPlayer(state, "human-1", bot.id);
   assert.ok(bot.isKicked || !state.players.some((player) => player.id === bot.id));
+});
+
+test("pot fraction shortcut includes the call before sizing a raise", () => {
+  const target = potFractionRaiseTarget({
+    pot: 1000,
+    callAmount: 200,
+    playerStreetBet: 0,
+    fraction: 1 / 2,
+    bigBlind: 40,
+    minRaiseTo: 400,
+    maxRaiseTo: 5000,
+  });
+  assert.equal(target, 800);
 });
