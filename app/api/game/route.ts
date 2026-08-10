@@ -1,10 +1,19 @@
-import { applyPlayerAction, maybeAdvanceGame, startHand, toPublicView } from "../../../lib/poker-engine";
+import {
+  addBotPlayer,
+  applyPlayerAction,
+  kickPlayer,
+  maybeAdvanceGame,
+  requestRebuy,
+  startHand,
+  toPublicView,
+} from "../../../lib/poker-engine";
 import type { PlayerAction } from "../../../lib/poker-types";
 import { getRequestUser, unauthorized } from "../../../lib/request-auth";
 import {
   findRecentRoomForUser,
   findRoomByCode,
   recordAction,
+  removeRoomMember,
   saveState,
   touchMembership,
   upsertUser,
@@ -24,6 +33,7 @@ export async function GET(request: Request) {
     if (!room) return Response.json({ needsRoom: true, user });
     const player = room.state.players.find((item) => item.id === user.id);
     if (!player) return Response.json({ needsJoin: true, code: room.state.roomCode, user });
+    if (player.isKicked) return Response.json({ error: "你已被房主移出这个房间" }, { status: 403 });
 
     const previousUpdatedAt = room.state.updatedAt;
     if (Date.now() - player.lastSeenAt > 6_000) player.lastSeenAt = Date.now();
@@ -48,17 +58,19 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json() as {
       code?: string;
-      type?: "action" | "chat" | "start";
+      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "add_bot";
       action?: PlayerAction;
       amount?: number;
       message?: string;
+      targetId?: string;
     };
     const room = await resolveRoom(user.id, payload.code);
     if (!room) return Response.json({ error: "房间不存在" }, { status: 404 });
     const player = room.state.players.find((item) => item.id === user.id);
-    if (!player) return Response.json({ error: "你还没有加入这个房间" }, { status: 403 });
+    if (!player || player.isKicked) return Response.json({ error: "你已不在这个房间中" }, { status: 403 });
     player.lastSeenAt = Date.now();
 
+    let kickedUserId: string | null = null;
     if (payload.type === "chat") {
       const text = payload.message?.trim().slice(0, 120) ?? "";
       if (!text) return Response.json({ error: "消息不能为空" }, { status: 400 });
@@ -73,6 +85,17 @@ export async function POST(request: Request) {
       }
       startHand(room.state);
       await recordAction(room.state, user.id, "start_hand");
+    } else if (payload.type === "rebuy") {
+      const granted = requestRebuy(room.state, user.id, Number(payload.amount));
+      await recordAction(room.state, user.id, "rebuy", granted);
+    } else if (payload.type === "add_bot") {
+      const bot = addBotPlayer(room.state, user.id);
+      await recordAction(room.state, user.id, "add_bot", bot.seat);
+    } else if (payload.type === "kick") {
+      const targetId = payload.targetId ?? "";
+      const target = kickPlayer(room.state, user.id, targetId);
+      if (!target.isBot) kickedUserId = target.id;
+      await recordAction(room.state, user.id, "kick_player", target.seat);
     } else {
       const action = payload.action;
       if (!action || !["fold", "check", "call", "raise"].includes(action)) {
@@ -83,6 +106,7 @@ export async function POST(request: Request) {
     }
 
     await saveState(room.state, room.version);
+    if (kickedUserId) await removeRoomMember(room.state.roomId, kickedUserId);
     await touchMembership(room.state.roomId, user.id);
     return Response.json({ game: toPublicView(room.state, user.id), user });
   } catch (error) {

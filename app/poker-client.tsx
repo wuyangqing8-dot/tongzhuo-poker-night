@@ -114,10 +114,11 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
-  const [showLobby, setShowLobby] = useState(false);
+  const [view, setView] = useState<"table" | "lobby">("table");
   const [lobbyMode, setLobbyMode] = useState<"create" | "join">(initialRoomCode ? "join" : "create");
   const [joinCode, setJoinCode] = useState(initialRoomCode ?? "");
   const [showRules, setShowRules] = useState(false);
+  const [showRebuy, setShowRebuy] = useState(false);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [message, setMessage] = useState("");
   const [raiseAmount, setRaiseAmount] = useState(0);
@@ -137,14 +138,14 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       const data = await apiRequest(`/api/game${code ? `?code=${encodeURIComponent(code)}` : ""}`);
       if (data.game) {
         setGame(data.game);
-        setShowLobby(false);
+        setView("table");
         setError("");
       } else if (data.needsJoin) {
         setJoinCode(code ?? "");
         setLobbyMode("join");
-        setShowLobby(true);
+        setView("lobby");
       } else if (data.needsRoom) {
-        setShowLobby(true);
+        setView("lobby");
       }
     } catch (loadError) {
       if (!quiet) setError(loadError instanceof Error ? loadError.message : "同步失败");
@@ -154,15 +155,15 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     }
   }, [game?.room.code, initialRoomCode]);
 
-  useEffect(() => { void loadGame(); }, [loadGame]);
+  useEffect(() => { if (view === "table") void loadGame(); }, [loadGame, view]);
 
   useEffect(() => {
     const sync = window.setInterval(() => {
-      if (document.visibilityState === "visible" && game) void loadGame(true);
+      if (document.visibilityState === "visible" && game && view === "table") void loadGame(true);
     }, 1_200);
     const clock = window.setInterval(() => setNow(Date.now()), 500);
     return () => { window.clearInterval(sync); window.clearInterval(clock); };
-  }, [game, loadGame]);
+  }, [game, loadGame, view]);
 
   useEffect(() => {
     if (game?.validActions.canRaise) setRaiseAmount(game.validActions.minRaiseTo);
@@ -187,7 +188,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       const data = await apiRequest("/api/rooms", { method: "POST", body: JSON.stringify(body) });
       if (data.game) {
         setGame(data.game);
-        setShowLobby(false);
+        setView("table");
         window.history.replaceState({}, "", `/?room=${encodeURIComponent(data.game.room.code)}`);
         notify(lobbyMode === "join" ? "已加入牌桌" : "房间已创建，服务器已完成随机发牌");
       }
@@ -240,6 +241,32 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     catch { notify(`房间码：${game.room.code}`); }
   }
 
+  async function manageRoom(type: "rebuy" | "add_bot" | "kick", options?: { amount?: number; targetId?: string }) {
+    if (!game || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      const data = await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type, ...options }),
+      });
+      if (data.game) setGame(data.game);
+      if (type === "rebuy") {
+        setShowRebuy(false);
+        notify(["preflop", "flop", "turn", "river"].includes(game.phase) ? "补码已预约，将在下一手生效" : "补码成功");
+      } else if (type === "add_bot") notify("机器人已加入牌桌");
+      else notify("玩家已移出房间");
+    } catch (manageError) {
+      setError(manageError instanceof Error ? manageError.message : "房间操作失败");
+    } finally { setPending(false); }
+  }
+
+  function kick(target: PublicPlayer) {
+    if (window.confirm(`确定将「${target.name}」移出房间吗？`)) {
+      void manageRoom("kick", { targetId: target.id });
+    }
+  }
+
   const viewer = game?.players.find((player) => player.id === game.viewerId);
   const turnPlayer = game?.players.find((player) => player.seat === game.turnSeat);
   const secondsLeft = game?.actionDeadline ? Math.max(0, Math.ceil((game.actionDeadline - now) / 1000)) : 0;
@@ -251,7 +278,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     const items: Array<{ position: string; player?: PublicPlayer }> = [];
     for (let offset = 1; offset < game.room.maxPlayers; offset += 1) {
       const seat = (viewer.seat + offset) % game.room.maxPlayers;
-      items.push({ position: relativeSeats[offset] || "seat-left", player: game.players.find((item) => item.seat === seat) });
+      items.push({ position: relativeSeats[offset] || "seat-left", player: game.players.find((item) => item.seat === seat && !item.isKicked) });
     }
     return items;
   }, [game, viewer]);
@@ -267,7 +294,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     );
   }
 
-  if (!game) {
+  if (view === "lobby" || !game) {
     return (
       <main className="lobby-screen">
         <div className="lobby-brand"><span className="brand-mark">♠</span><span><b>同桌</b><small>POKER NIGHT</small></span></div>
@@ -279,6 +306,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             <button className={lobbyMode === "create" ? "active" : ""} type="button" onClick={() => setLobbyMode("create")}>创建房间</button>
             <button className={lobbyMode === "join" ? "active" : ""} type="button" onClick={() => setLobbyMode("join")}>输入房间码</button>
           </div>
+          {game && <button className="back-to-table" type="button" onClick={() => setView("table")}>← 返回当前牌桌 · {game.room.name}</button>}
           <form className="create-form" onSubmit={createOrJoin}>
             {lobbyMode === "join" ? (
               <label>房间码<input name="code" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="TONG-XXXXXX" required /></label>
@@ -311,12 +339,13 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
         <button className="brand" type="button" aria-label="同桌牌桌"><span className="brand-mark">♠</span><span className="brand-word">同桌</span><span className="brand-note">POKER NIGHT</span></button>
         <nav className="main-nav" aria-label="主导航">
           <button className="nav-item active" type="button">牌桌</button>
-          <button className="nav-item" type="button" onClick={() => { setLobbyMode("create"); setGame(null); setShowLobby(true); }}>新房间</button>
-          <button className="nav-item" type="button" onClick={() => { setLobbyMode("join"); setGame(null); setShowLobby(true); }}>加入房间</button>
+          <button className="nav-item" type="button" onClick={() => { setLobbyMode("create"); setError(""); setView("lobby"); }}>新房间</button>
+          <button className="nav-item" type="button" onClick={() => { setLobbyMode("join"); setJoinCode(""); setError(""); setView("lobby"); }}>加入房间</button>
           <button className="nav-item" type="button" onClick={() => setShowRules(true)}>规则</button>
         </nav>
         <div className="topbar-actions">
           <span className="server-badge"><i /> 服务器已同步</span>
+          <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
           <button className="invite-button" type="button" onClick={copyInvite}>＋ 邀请同学</button>
           <span className="my-avatar" title={user.displayName}>{initials(user.displayName)}</span>
         </div>
@@ -386,7 +415,11 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
 
         <aside className={`side-panel ${showMobilePanel ? "mobile-panel-open" : ""}`}>
           <div className="side-tabs"><button className="active" type="button">房间动态</button><button type="button">第 {game.handNumber} 手</button></div>
-          <div className="players-card"><div className="section-title"><span>本桌玩家</span><small>{game.players.length} / {game.room.maxPlayers}</small></div><div className="mini-player-list">{game.players.map((player) => <div className="mini-player" key={player.id}><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}</b><small>{player.chips.toLocaleString()} 筹码</small></span><i className={player.isOnline ? "online-dot" : "away-dot"} /></div>)}</div></div>
+          <div className="players-card">
+            <div className="section-title"><span>本桌玩家</span><small>{game.players.filter((player) => !player.isKicked).length} / {game.room.maxPlayers}</small></div>
+            <div className="mini-player-list">{game.players.filter((player) => !player.isKicked).map((player) => <div className="mini-player" key={player.id}><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}{player.isBot ? " · BOT" : ""}</b><small>{player.chips.toLocaleString()} 筹码{player.pendingRebuy ? ` · 待补 ${player.pendingRebuy.toLocaleString()}` : ""}</small></span><span className="player-row-actions"><i className={player.isOnline ? "online-dot" : "away-dot"} />{game.room.ownerId === user.id && player.id !== user.id && <button type="button" onClick={() => kick(player)} disabled={pending}>移出</button>}</span></div>)}</div>
+            {game.room.ownerId === user.id && <div className="host-tools"><button type="button" onClick={copyInvite}>＋ 邀请真人</button><button type="button" onClick={() => manageRoom("add_bot")} disabled={pending || game.players.filter((player) => !player.isKicked).length >= game.room.maxPlayers}>♟ 添加机器人</button></div>}
+          </div>
           <div className="log-card"><div className="section-title"><span>行动记录</span><small>服务端</small></div><div className="game-logs">{[...game.logs].reverse().slice(0, 7).map((log) => <p className={log.kind} key={log.id}><time>{new Date(log.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{log.text}</p>)}</div></div>
           <div className="chat-card"><div className="section-title"><span>牌桌聊天</span><small>跨设备同步</small></div><div className="chat-messages">{game.chats.length ? game.chats.map((item) => <div className="chat-message" key={item.id}><span className="chat-avatar" style={{ background: seatColors[Math.abs(item.userId.length) % seatColors.length] }}>{initials(item.name).slice(0, 1)}</span><div><span className="chat-meta"><b>{item.name}</b><time>{new Date(item.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></span><p>{item.text}</p></div></div>) : <p className="empty-chat">还没有消息，先打个招呼吧。</p>}</div><form className="chat-form" onSubmit={sendMessage}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="说点什么…" maxLength={120} aria-label="聊天消息" /><button type="submit" aria-label="发送">↗</button></form></div>
           <a className="leave-room" href="/signout-with-chatgpt?return_to=/">退出账号</a>
@@ -396,8 +429,8 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       <button className="mobile-panel-toggle" type="button" onClick={() => setShowMobilePanel(!showMobilePanel)}>{showMobilePanel ? "收起动态" : "房间动态"}</button>
 
       {showRules && <div className="modal-backdrop" onMouseDown={() => setShowRules(false)}><section className="modal-card rules-card" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowRules(false)}>×</button><span className="modal-kicker">正常德州规则</span><h2>这次，牌局是真的</h2><div className="rule-list"><div><b>01</b><span><strong>服务器安全洗牌</strong><small>每手使用加密随机数重新洗 52 张牌，前端拿不到牌堆。</small></span></div><div><b>02</b><span><strong>严格轮流行动</strong><small>过牌、跟注、加注、全下和超时均由服务器验证。</small></span></div><div><b>03</b><span><strong>自动结算边池</strong><small>支持平分底池、全下边池与七选五最佳牌型。</small></span></div></div><button className="primary-action" type="button" onClick={() => setShowRules(false)}>回到牌桌</button></section></div>}
+      {showRebuy && <div className="modal-backdrop" onMouseDown={() => setShowRebuy(false)}><section className="modal-card rebuy-card" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowRebuy(false)}>×</button><span className="modal-kicker">REBUY</span><h2>补充桌面筹码</h2><p>牌局进行中提交的筹码会在下一手开始前到账，不会影响当前底池。</p><div className="rebuy-balance"><span>当前筹码</span><b>{viewer?.chips.toLocaleString() ?? 0}</b>{viewer?.pendingRebuy ? <small>已预约 +{viewer.pendingRebuy.toLocaleString()}</small> : <small>本桌上限 {(game.room.startingChips * 5).toLocaleString()}</small>}</div><div className="rebuy-options"><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: 1000 })}>+1,000</button><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: 3000 })}>+3,000</button><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: game.room.startingChips })}>+{game.room.startingChips.toLocaleString()}</button></div><small className="rebuy-note">娱乐积分，无充值与提现</small></section></div>}
       {toast && <div className="toast" role="status">✓ {toast}</div>}
-      {showLobby && !game && null}
     </main>
   );
 }

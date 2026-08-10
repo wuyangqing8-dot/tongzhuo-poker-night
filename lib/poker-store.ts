@@ -162,6 +162,11 @@ export async function touchMembership(roomId: string, userId: string) {
     .bind(Date.now(), roomId, userId).run();
 }
 
+export async function removeRoomMember(roomId: string, userId: string) {
+  await db().prepare("DELETE FROM room_members WHERE room_id = ? AND user_id = ?")
+    .bind(roomId, userId).run();
+}
+
 export async function recordAction(state: PokerGameState, actorId: string, action: string, amount = 0) {
   await db().prepare(`INSERT INTO game_actions (room_id, hand_number, actor_id, action, amount, created_at)
     VALUES (?, ?, ?, ?, ?, ?)`)

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPlayerAction, createInitialState, toPublicView } from "../lib/poker-engine";
+import {
+  addBotPlayer,
+  applyPlayerAction,
+  createInitialState,
+  kickPlayer,
+  requestRebuy,
+  startHand,
+  toPublicView,
+} from "../lib/poker-engine";
 
 function newThreePlayerGame() {
   return createInitialState({
@@ -45,4 +53,24 @@ test("only the current player may act and bot actions follow automatically", () 
 test("raise validation rejects amounts below the legal minimum", () => {
   const state = newThreePlayerGame();
   assert.throws(() => applyPlayerAction(state, "human-1", "raise", 41), /最小加注/);
+});
+
+test("rebuy during a hand is queued and applied before the next hand", () => {
+  const state = newThreePlayerGame();
+  requestRebuy(state, "human-1", 1000);
+  const player = state.players.find((item) => item.id === "human-1")!;
+  assert.equal(player.pendingRebuy, 1000);
+  const chipsBefore = player.chips;
+  startHand(state);
+  assert.equal(player.pendingRebuy, 0);
+  assert.ok(player.chips > chipsBefore);
+});
+
+test("owner can add and kick a bot", () => {
+  const state = newThreePlayerGame();
+  const count = state.players.length;
+  const bot = addBotPlayer(state, "human-1");
+  assert.equal(state.players.length, count + 1);
+  kickPlayer(state, "human-1", bot.id);
+  assert.ok(bot.isKicked || !state.players.some((player) => player.id === bot.id));
 });

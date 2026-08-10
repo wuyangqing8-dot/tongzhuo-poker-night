@@ -107,6 +107,15 @@ function handReadyPlayers(state: PokerGameState) {
 }
 
 export function startHand(state: PokerGameState) {
+  state.players = state.players.filter((player) => !player.isKicked);
+  state.players.forEach((player) => {
+    const pending = player.pendingRebuy ?? 0;
+    if (pending > 0) {
+      player.chips += pending;
+      player.pendingRebuy = 0;
+      addLog(state, `${player.name} 补充 ${pending.toLocaleString()} 筹码`, "system");
+    }
+  });
   let ready = handReadyPlayers(state);
   if (ready.length < 2 && state.players.length >= 2) {
     state.players.forEach((player) => { player.chips = state.startingChips; });
@@ -561,6 +570,8 @@ export function createInitialState(input: {
     isBot: false,
     lastAction: "已入座",
     lastSeenAt: now,
+    pendingRebuy: 0,
+    isKicked: false,
   }];
   const botNames = ["林墨", "Mia", "Leo", "周扬", "陈一凡"];
   for (let index = 0; index < Math.min(input.bots, input.maxPlayers - 1); index += 1) {
@@ -579,6 +590,8 @@ export function createInitialState(input: {
       isBot: true,
       lastAction: "已入座",
       lastSeenAt: now,
+      pendingRebuy: 0,
+      isKicked: false,
     });
   }
   const state: PokerGameState = {
@@ -615,6 +628,7 @@ export function createInitialState(input: {
 export function addHumanPlayer(state: PokerGameState, user: { id: string; displayName: string; email: string }) {
   const existing = state.players.find((player) => player.id === user.id);
   if (existing) {
+    if (existing.isKicked) throw new Error("你已被房主移出，请等待当前手牌结束后再加入");
     existing.name = user.displayName;
     existing.email = user.email;
     existing.lastSeenAt = Date.now();
@@ -639,8 +653,90 @@ export function addHumanPlayer(state: PokerGameState, user: { id: string; displa
     isBot: false,
     lastAction: state.phase === "waiting" ? "已入座" : "下手牌加入",
     lastSeenAt: Date.now(),
+    pendingRebuy: 0,
+    isKicked: false,
   });
   addLog(state, `${user.displayName} 加入了牌桌`, "system");
   if (state.phase === "waiting" && state.players.length >= 2) startHand(state);
   return state;
+}
+
+export function requestRebuy(state: PokerGameState, userId: string, requestedAmount: number) {
+  const player = state.players.find((item) => item.id === userId && !item.isKicked);
+  if (!player || player.isBot) throw new Error("无法为这个座位补码");
+  const amount = Math.floor(requestedAmount);
+  if (!Number.isFinite(amount) || amount < 100) throw new Error("补码至少为 100");
+  const cap = state.startingChips * 5;
+  const available = cap - player.chips - (player.pendingRebuy ?? 0);
+  const granted = Math.min(amount, available);
+  if (granted <= 0) throw new Error("你的筹码已经达到本桌上限");
+  const handActive = ["preflop", "flop", "turn", "river"].includes(state.phase) && player.hole.length === 2;
+  if (handActive) {
+    player.pendingRebuy = (player.pendingRebuy ?? 0) + granted;
+    player.lastAction = `已预约补码 ${granted.toLocaleString()}`;
+    addLog(state, `${player.name} 预约在下一手补充 ${granted.toLocaleString()} 筹码`, "system");
+  } else {
+    player.chips += granted;
+    player.lastAction = `补码 ${granted.toLocaleString()}`;
+    addLog(state, `${player.name} 补充 ${granted.toLocaleString()} 筹码`, "system");
+  }
+  state.updatedAt = Date.now();
+  return granted;
+}
+
+export function addBotPlayer(state: PokerGameState, actorId: string) {
+  if (state.ownerId !== actorId) throw new Error("只有房主可以添加机器人");
+  const activePlayers = state.players.filter((player) => !player.isKicked);
+  if (activePlayers.length >= state.maxPlayers) throw new Error("房间已经满了");
+  const usedSeats = new Set(activePlayers.map((player) => player.seat));
+  let seat = 0;
+  while (usedSeats.has(seat)) seat += 1;
+  const botNumber = state.players.filter((player) => player.isBot).length + 1;
+  const botNames = ["小林", "Mia", "Leo", "周扬", "一凡", "阿布"];
+  const bot: GamePlayer = {
+    id: `bot:${state.roomId}:${crypto.randomUUID()}`,
+    name: botNames[(botNumber - 1) % botNames.length],
+    email: null,
+    seat,
+    chips: state.startingChips,
+    streetBet: 0,
+    contribution: 0,
+    hole: [],
+    folded: true,
+    allIn: false,
+    acted: true,
+    isBot: true,
+    lastAction: state.phase === "waiting" ? "已入座" : "下手牌加入",
+    lastSeenAt: Date.now(),
+    pendingRebuy: 0,
+    isKicked: false,
+  };
+  state.players.push(bot);
+  addLog(state, `房主添加了机器人 ${bot.name}`, "system");
+  if (state.phase === "waiting" && state.players.filter((player) => !player.isKicked).length >= 2) startHand(state);
+  state.updatedAt = Date.now();
+  return bot;
+}
+
+export function kickPlayer(state: PokerGameState, actorId: string, targetId: string) {
+  if (state.ownerId !== actorId) throw new Error("只有房主可以移出玩家");
+  if (targetId === actorId) throw new Error("房主不能移出自己");
+  const target = state.players.find((player) => player.id === targetId && !player.isKicked);
+  if (!target) throw new Error("玩家已经不在房间中");
+  addLog(state, `${target.name} 已被房主移出牌桌`, "system");
+  const handActive = ["preflop", "flop", "turn", "river"].includes(state.phase) && target.hole.length === 2;
+  if (handActive) {
+    target.isKicked = true;
+    target.folded = true;
+    target.acted = true;
+    target.lastAction = "已被移出";
+    if (target.seat === state.turnSeat) {
+      advanceAfterAction(state, target.seat);
+      runBots(state);
+    }
+  } else {
+    state.players = state.players.filter((player) => player.id !== targetId);
+  }
+  state.updatedAt = Date.now();
+  return target;
 }

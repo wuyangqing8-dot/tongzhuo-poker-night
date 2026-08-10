@@ -19,6 +19,8 @@ export type GamePlayer = {
   isBot: boolean;
   lastAction: string;
   lastSeenAt: number;
+  pendingRebuy?: number;
+  isKicked?: boolean;
 };
 
 export type GameLog = {
