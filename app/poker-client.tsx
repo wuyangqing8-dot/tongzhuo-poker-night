@@ -109,6 +109,7 @@ function PlayerSeat({ player, position, dealer, active, phase, amountUnit, bigBl
   const showBacks = phase !== "waiting" && player.lastAction !== "下手牌加入" && player.hole === null;
   return (
     <div className={`player-seat ${position} ${active ? "active-seat" : ""} ${player.folded ? "folded-seat" : ""}`}>
+      {player.tablePosition && <span className="seat-position-badge" title={positionName(player.tablePosition)}>{player.tablePosition}</span>}
       {(showBacks || player.hole?.length) && (
         <div className="opponent-cards" aria-label={`${player.name}的手牌`}>
           {player.hole?.length
@@ -126,6 +127,23 @@ function PlayerSeat({ player, position, dealer, active, phase, amountUnit, bigBl
       {player.lastAction && <span className="player-status">{player.lastAction}</span>}
     </div>
   );
+}
+
+function positionName(position: NonNullable<PublicPlayer["tablePosition"]>) {
+  const names: Record<NonNullable<PublicPlayer["tablePosition"]>, string> = {
+    "BTN / SB": "庄家兼小盲位",
+    BTN: "庄家位",
+    SB: "小盲位",
+    BB: "大盲位",
+    UTG: "枪口位",
+    "UTG+1": "枪口位后一位",
+    "UTG+2": "枪口位后二位",
+    MP: "中间位",
+    LJ: "Lojack 位",
+    HJ: "Hijack 位",
+    CO: "关煞位",
+  };
+  return names[position];
 }
 
 function DealAnimation({ burst, positions }: { burst: DealBurst | null; positions: string[] }) {
@@ -342,7 +360,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       if (data.game) {
         setGame(data.game);
         setView("table");
-        window.history.replaceState({}, "", `/?room=${encodeURIComponent(data.game.room.code)}`);
+        window.history.replaceState({}, "", `/table?room=${encodeURIComponent(data.game.room.code)}`);
         notify(lobbyMode === "join" ? "已加入牌桌" : "房间已创建，服务器已完成随机发牌");
       }
     } catch (actionError) {
@@ -795,7 +813,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
               {viewer && (
                 <div className={`hero-seat ${viewer.folded ? "hero-folded" : ""}`}>
                   <div className="hero-cards">{viewer.hole?.length ? viewer.hole.map((card, index) => <Card key={card} code={card} small delay={index * 90} />) : <><Card small hidden /><Card small hidden delay={90} /></>}</div>
-                  <div className="hero-profile"><span className="hero-avatar">{initials(viewer.name)}</span><span><b>你 · {viewer.name}</b><small>{formatAmount(viewer.chips, game.room.bigBlind, amountUnit)}{amountUnit === "chips" ? " 筹码" : ""}</small></span></div>
+                  <div className="hero-profile">{viewer.tablePosition && <span className="hero-position-badge" title={positionName(viewer.tablePosition)}>{viewer.tablePosition}</span>}<span className="hero-avatar">{initials(viewer.name)}</span><span><b>你 · {viewer.name}</b><small>{formatAmount(viewer.chips, game.room.bigBlind, amountUnit)}{amountUnit === "chips" ? " 筹码" : ""}</small></span></div>
                   <span className="hand-strength">{viewer.lastAction || phaseName[game.phase]}</span>
                 </div>
               )}

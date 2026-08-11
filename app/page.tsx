@@ -1,5 +1,5 @@
-import { requireChatGPTUser } from "./chatgpt-auth";
-import PokerClient from "./poker-client";
+import AuthLanding from "./auth-landing";
+import { chatGPTSignInPath, getChatGPTUser } from "./chatgpt-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -7,18 +7,18 @@ type PageProps = {
   searchParams: Promise<{ room?: string }>;
 };
 
-async function AuthenticatedTable({ room }: { room?: string }) {
-  const returnTo = room ? `/?room=${encodeURIComponent(room)}` : "/";
-  const user = await requireChatGPTUser(returnTo);
-  return (
-    <PokerClient
-      initialRoomCode={room}
-      user={{ id: user.userId, email: user.email, displayName: user.displayName }}
-    />
-  );
-}
-
 export default async function Home({ searchParams }: PageProps) {
   const { room } = await searchParams;
-  return <AuthenticatedTable room={room} />;
+  const normalizedRoom = room?.trim().toUpperCase().slice(0, 20);
+  const tablePath = normalizedRoom ? `/table?room=${encodeURIComponent(normalizedRoom)}` : "/table";
+  const user = await getChatGPTUser();
+
+  return (
+    <AuthLanding
+      roomCode={normalizedRoom}
+      signInPath={chatGPTSignInPath(tablePath)}
+      tablePath={tablePath}
+      user={user}
+    />
+  );
 }

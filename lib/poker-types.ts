@@ -187,6 +187,7 @@ export type PokerGameState = {
 export type PublicPlayer = Omit<GamePlayer, "hole" | "email"> & {
   hole: CardCode[] | null;
   isOnline: boolean;
+  tablePosition: import("./table-positions").PokerTablePosition | null;
 };
 
 export type ValidActions = {

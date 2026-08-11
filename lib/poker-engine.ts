@@ -17,6 +17,7 @@ import type {
 } from "./poker-types";
 import { DEALER_PRESETS, DEFAULT_DEALER } from "./dealer-options";
 import { DEFAULT_PARTY_TRIGGERS, ONLINE_PARTY_EFFECTS, ONLINE_PARTY_TRIGGERS, partyEffect, partyTrigger } from "./online-party";
+import { getTablePositions } from "./table-positions";
 
 const ranks: Rank[] = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const suits: Suit[] = ["S", "H", "D", "C"];
@@ -1141,6 +1142,7 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
   const revealAll = state.phase === "showdown";
   const roomMode = state.roomMode ?? "classic";
   const party = roomMode === "party" ? ensurePartyState(state) : undefined;
+  const tablePositions = getTablePositions(state.players, state.dealerSeat, state.maxPlayers);
   const noRaise = !!viewer && state.phase === "preflop" && partyEffectsFor(state, "no_raise", viewer.id).length > 0;
   const miniRaise = !!viewer && state.phase === "preflop" && partyEffectsFor(state, "mini_raise", viewer.id).length > 0;
 
@@ -1179,6 +1181,7 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
         ...player,
         hole: visibleHole(source),
         isOnline: player.isBot || Date.now() - player.lastSeenAt < 18_000,
+        tablePosition: tablePositions.get(source.id) ?? null,
       };
     }),
     logs: state.logs.slice(-16),

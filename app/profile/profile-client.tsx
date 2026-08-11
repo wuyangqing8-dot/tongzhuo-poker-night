@@ -49,7 +49,7 @@ export default function ProfileClient({ user }: { user: AuthenticatedUser }) {
     <main className="profile-page">
       <header className="profile-topbar">
         <a className="profile-brand" href="/"><span>♠</span><b>同桌</b><small>PLAYER PROFILE</small></a>
-        <nav><a href="/">返回牌桌</a><a href="/lucky">娱乐转盘</a><a href="/signout-with-chatgpt?return_to=/">退出账号</a></nav>
+        <nav><a href="/table">返回牌桌</a><a href="/lucky">娱乐转盘</a><a href="/signout-with-chatgpt?return_to=/">退出账号</a></nav>
       </header>
 
       <section className="profile-shell">
@@ -77,14 +77,14 @@ export default function ProfileClient({ user }: { user: AuthenticatedUser }) {
             </section>
 
             <section className="profile-panel rooms-panel">
-              <div className="profile-panel-title"><div><span>最近牌局</span><small>按房间汇总</small></div><a href="/">加入新牌局 →</a></div>
+              <div className="profile-panel-title"><div><span>最近牌局</span><small>按房间汇总</small></div><a href="/table">加入新牌局 →</a></div>
               <div className="profile-room-list">{profile.rooms.length ? profile.rooms.slice(0, 6).map((room) => <article key={room.roomId}><span className={`room-mode-icon ${room.roomMode}`}>{room.roomMode === "party" ? "🎡" : "♠"}</span><div><b>{room.roomName}</b><small>{room.roomCode} · {room.hands} 手 · {shortDate(room.lastPlayedAt)}</small></div><strong className={room.net > 0 ? "net-win" : room.net < 0 ? "net-loss" : "net-even"}>{chips(room.net, true)}</strong></article>) : <div className="profile-empty-mini"><span>◇</span><p>还没有已结算的牌局。</p></div>}</div>
             </section>
           </div>
 
           <section className="profile-panel history-panel">
             <div className="profile-panel-title"><div><span>手牌历史</span><small>仅显示你自己的结果</small></div><em>刷新页面可同步最新结算</em></div>
-            {profile.recentHands.length ? <div className="profile-history-table"><div className="history-head"><span>牌局</span><span>手牌</span><span>结果</span><span>结束筹码</span><span>时间</span></div>{profile.recentHands.map((hand) => <article key={hand.id}><span><b>{hand.roomName}</b><small>{hand.roomMode === "party" ? "娱乐德州" : "常规德州"} · {hand.roomCode}</small></span><span>Hand #{hand.handNumber}</span><strong className={hand.net > 0 ? "net-win" : hand.net < 0 ? "net-loss" : "net-even"}>{chips(hand.net, true)}</strong><span>{chips(hand.endingChips)}</span><time>{shortDate(hand.completedAt)}</time><p>{hand.resultText}</p></article>)}</div> : <div className="profile-empty"><span>♠</span><h2>你的牌局故事还没开始</h2><p>创建或加入一个房间，完成结算后，输赢、胜率和历史会自动记录到当前邮箱账号。</p><a href="/">去牌桌玩一手</a></div>}
+            {profile.recentHands.length ? <div className="profile-history-table"><div className="history-head"><span>牌局</span><span>手牌</span><span>结果</span><span>结束筹码</span><span>时间</span></div>{profile.recentHands.map((hand) => <article key={hand.id}><span><b>{hand.roomName}</b><small>{hand.roomMode === "party" ? "娱乐德州" : "常规德州"} · {hand.roomCode}</small></span><span>Hand #{hand.handNumber}</span><strong className={hand.net > 0 ? "net-win" : hand.net < 0 ? "net-loss" : "net-even"}>{chips(hand.net, true)}</strong><span>{chips(hand.endingChips)}</span><time>{shortDate(hand.completedAt)}</time><p>{hand.resultText}</p></article>)}</div> : <div className="profile-empty"><span>♠</span><h2>你的牌局故事还没开始</h2><p>创建或加入一个房间，完成结算后，输赢、胜率和历史会自动记录到当前邮箱账号。</p><a href="/table">去牌桌玩一手</a></div>}
           </section>
         </>}
         <footer className="profile-footer">所有筹码仅用于朋友娱乐，不包含充值、提现或真实货币结算。</footer>

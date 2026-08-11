@@ -3,6 +3,7 @@ import test from "node:test";
 import { potFractionRaiseTarget } from "../lib/bet-sizing";
 import { getStrategyAdvice } from "../lib/strategy-advisor";
 import type { PartyRuntimeEffect } from "../lib/poker-types";
+import { getTablePositions } from "../lib/table-positions";
 import {
   addBotPlayer,
   addHumanPlayer,
@@ -36,6 +37,19 @@ function newThreePlayerGame() {
     bots: 2,
   });
 }
+
+test("table positions follow the dealer for six-handed and heads-up games", () => {
+  const sixPlayers = Array.from({ length: 6 }, (_, seat) => ({ id: `p${seat}`, seat, hole: ["card-1", "card-2"] }));
+  const sixHanded = getTablePositions(sixPlayers, 3, 6);
+  assert.deepEqual([...sixHanded.entries()], [
+    ["p3", "BTN"], ["p4", "SB"], ["p5", "BB"],
+    ["p0", "UTG"], ["p1", "HJ"], ["p2", "CO"],
+  ]);
+
+  const headsUp = getTablePositions([sixPlayers[1], sixPlayers[4]], 4, 6);
+  assert.equal(headsUp.get("p4"), "BTN / SB");
+  assert.equal(headsUp.get("p1"), "BB");
+});
 
 test("server shuffle deals unique private cards and hides opponents", () => {
   const state = newThreePlayerGame();
