@@ -11,6 +11,7 @@ import type {
 } from "../lib/poker-types";
 import { potFractionRaiseTarget } from "../lib/bet-sizing";
 import { DEALER_PRESETS } from "../lib/dealer-options";
+import { getStrategyAdvice } from "../lib/strategy-advisor";
 
 type ClientProps = {
   user: AuthenticatedUser;
@@ -32,6 +33,21 @@ const phaseName = {
 
 const seatColors = ["#ef7658", "#8ca98d", "#d2a7aa", "#809bb1", "#b99c72", "#d89066"];
 const relativeSeats = ["", "seat-bottom-right", "seat-right", "seat-top-right", "seat-top-left", "seat-left"];
+type AmountUnit = "chips" | "bb";
+
+const strategyActions = [
+  { key: "fold", label: "弃牌" },
+  { key: "check", label: "过牌" },
+  { key: "call", label: "跟注" },
+  { key: "raise", label: "加注" },
+] as const;
+
+function formatAmount(amount: number, bigBlind: number, unit: AmountUnit) {
+  if (unit === "chips") return Math.round(amount).toLocaleString();
+  const blinds = amount / Math.max(1, bigBlind);
+  const precision = Number.isInteger(blinds) ? 0 : Math.abs(blinds) >= 10 ? 1 : 2;
+  return `${blinds.toFixed(precision).replace(/\.?0+$/, "")} BB`;
+}
 
 type DealBurst = {
   id: string;
@@ -65,12 +81,14 @@ function Card({ code, small = false, hidden = false, delay = 0 }: { code?: CardC
   );
 }
 
-function PlayerSeat({ player, position, dealer, active, phase }: {
+function PlayerSeat({ player, position, dealer, active, phase, amountUnit, bigBlind }: {
   player?: PublicPlayer;
   position: string;
   dealer?: boolean;
   active?: boolean;
   phase: PublicGameView["phase"];
+  amountUnit: AmountUnit;
+  bigBlind: number;
 }) {
   if (!player) {
     return (
@@ -95,7 +113,7 @@ function PlayerSeat({ player, position, dealer, active, phase }: {
         {dealer && <span className="dealer-chip">D</span>}
       </div>
       <span className="player-name">{player.name}{player.isBot ? " · BOT" : ""}</span>
-      <span className="player-chips">{player.chips.toLocaleString()} 筹码</span>
+      <span className="player-chips">{formatAmount(player.chips, bigBlind, amountUnit)}{amountUnit === "chips" ? " 筹码" : ""}</span>
       <span className={`connection-dot ${player.isOnline ? "online" : ""}`} title={player.isOnline ? "在线" : "暂时离线"} />
       {player.lastAction && <span className="player-status">{player.lastAction}</span>}
     </div>
@@ -195,6 +213,9 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [message, setMessage] = useState("");
   const [raiseAmount, setRaiseAmount] = useState(0);
+  const [potPercent, setPotPercent] = useState(50);
+  const [amountUnit, setAmountUnit] = useState<AmountUnit>("chips");
+  const [showGto, setShowGto] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [dealBurst, setDealBurst] = useState<DealBurst | null>(null);
   const polling = useRef(false);
@@ -241,8 +262,19 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   }, [game, loadGame, view]);
 
   useEffect(() => {
-    if (game?.validActions.canRaise) setRaiseAmount(game.validActions.minRaiseTo);
+    if (game?.validActions.canRaise) {
+      setRaiseAmount((current) => current >= game.validActions.minRaiseTo && current <= game.validActions.maxRaiseTo
+        ? current
+        : game.validActions.minRaiseTo);
+    }
   }, [game?.version, game?.validActions.canRaise, game?.validActions.minRaiseTo]);
+
+  useEffect(() => {
+    const savedUnit = window.localStorage.getItem("tongzhuo-amount-unit");
+    const savedGto = window.localStorage.getItem("tongzhuo-gto-advisor");
+    if (savedUnit === "bb") setAmountUnit("bb");
+    if (savedGto === "on") setShowGto(true);
+  }, []);
 
   useEffect(() => {
     if (!game) return;
@@ -422,17 +454,58 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       .sort((left, right) => right.net - left.net);
   }, [game]);
 
+  const gtoAdvice = useMemo(() => {
+    if (!game || !viewer || viewer.folded) return null;
+    return getStrategyAdvice({
+      phase: game.phase,
+      hole: viewer.hole ?? [],
+      board: game.board,
+      pot: game.pot,
+      callAmount: game.validActions.callAmount,
+      stack: viewer.chips,
+    });
+  }, [game, viewer]);
+
   function setPotFraction(fraction: number) {
     if (!game || !viewer || !game.validActions.canRaise) return;
+    setPotPercent(Math.max(1, Math.round(fraction * 100)));
     setRaiseAmount(potFractionRaiseTarget({
       pot: game.pot,
       callAmount: game.validActions.callAmount,
       playerStreetBet: viewer.streetBet,
       fraction,
-      bigBlind: game.room.bigBlind,
+      chipStep: 1,
       minRaiseTo: game.validActions.minRaiseTo,
       maxRaiseTo: game.validActions.maxRaiseTo,
     }));
+  }
+
+  function setPrecisePotPercent(value: number) {
+    if (!game || !viewer) return;
+    const percent = Math.max(1, Math.min(300, Math.round(value || 1)));
+    setPotPercent(percent);
+    if (!game.validActions.canRaise) return;
+    setRaiseAmount(potFractionRaiseTarget({
+      pot: game.pot,
+      callAmount: game.validActions.callAmount,
+      playerStreetBet: viewer.streetBet,
+      fraction: percent / 100,
+      chipStep: 1,
+      minRaiseTo: game.validActions.minRaiseTo,
+      maxRaiseTo: game.validActions.maxRaiseTo,
+    }));
+  }
+
+  function selectAmountUnit(unit: AmountUnit) {
+    setAmountUnit(unit);
+    window.localStorage.setItem("tongzhuo-amount-unit", unit);
+  }
+
+  function toggleGto() {
+    setShowGto((current) => {
+      window.localStorage.setItem("tongzhuo-gto-advisor", current ? "off" : "on");
+      return !current;
+    });
   }
 
   if (loading) {
@@ -510,7 +583,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <h1>{game.room.name}</h1>
           <p>第 {game.handNumber} 手 · {phaseName[game.phase]} · 盲注 {game.room.smallBlind} / {game.room.bigBlind}</p>
         </div>
-        <div className="room-tools"><span className="safe-play">服务器发牌 · 非现金</span><button className="more-button" type="button" onClick={() => setShowRules(true)}>•••</button></div>
+        <div className="room-tools"><div className="table-display-switches"><div className="unit-switch" aria-label="筹码显示单位"><button className={amountUnit === "chips" ? "active" : ""} type="button" onClick={() => selectAmountUnit("chips")}>筹码</button><button className={amountUnit === "bb" ? "active" : ""} type="button" onClick={() => selectAmountUnit("bb")}>BB</button></div><button className={`gto-switch ${showGto ? "active" : ""}`} type="button" aria-pressed={showGto} onClick={toggleGto}>GTO 参考</button></div><span className="safe-play">服务器发牌 · 非现金</span><button className="more-button" type="button" onClick={() => setShowRules(true)}>•••</button></div>
       </section>
 
       {error && <button className="game-error" type="button" onClick={() => setError("")}>同步提示：{error} ×</button>}
@@ -518,7 +591,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       <div className="game-layout">
         <section className="table-panel" aria-label="实时德州扑克牌桌">
           <div className="turn-banner">
-            <div><span className="turn-label">{game.phase === "showdown" ? game.resultText : game.validActions.isYourTurn ? "轮到你了" : turnPlayer ? `${turnPlayer.name} 行动中` : "等待牌局开始"}</span><span className="turn-hint">{game.validActions.isYourTurn ? game.validActions.callAmount ? `需跟注 ${game.validActions.callAmount}` : "可以过牌或加注" : "状态会自动同步"}</span></div>
+            <div><span className="turn-label">{game.phase === "showdown" ? game.resultText : game.validActions.isYourTurn ? "轮到你了" : turnPlayer ? `${turnPlayer.name} 行动中` : "等待牌局开始"}</span><span className="turn-hint">{game.validActions.isYourTurn ? game.validActions.callAmount ? `需跟注 ${formatAmount(game.validActions.callAmount, game.room.bigBlind, amountUnit)}` : "可以过牌或加注" : "状态会自动同步"}</span></div>
             <span className="timer">{game.phase === "showdown" ? `下一手 ${nextHandSeconds}s` : secondsLeft ? `00:${String(secondsLeft).padStart(2, "0")}` : "LIVE"}</span>
             <div className="timer-track"><span style={{ width: game.phase === "showdown" ? `${(nextHandSeconds / 8) * 100}%` : timerProgress }} /></div>
           </div>
@@ -537,19 +610,20 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             <div className="poker-table">
               <div className="table-rail" /><div className="felt-texture" /><div className="table-brand"><span>同桌</span><small>FAIR PLAY</small></div>
               <div className="board-area">
-                <div className="pot-label">底池</div><strong>{game.pot.toLocaleString()}</strong>
+                <div className="pot-label">底池</div><strong>{formatAmount(game.pot, game.room.bigBlind, amountUnit)}</strong>
                 <div className="chip-stack"><i className="chip chip-coral" /><i className="chip chip-cream" /><i className="chip chip-dark" /></div>
                 <div className="community-cards">
                   {Array.from({ length: 5 }, (_, index) => game.board[index]
                     ? <Card key={`${game.handNumber}-${game.board[index]}`} code={game.board[index]} delay={index * 70} />
                     : <div className="card-placeholder" key={`empty-${index}`} aria-label="尚未发出的公共牌" />)}
                 </div>
+                {!!game.actionFeed.length && <div className="table-action-feed" aria-live="polite">{game.actionFeed.slice(-3).map((move, index, moves) => <div className={`table-action ${index === moves.length - 1 ? "latest" : ""}`} key={move.id}><span>{move.playerName}{move.isBot ? " · BOT" : ""}</span><b>{move.label}{move.amount > 0 ? ` ${formatAmount(move.amount, game.room.bigBlind, amountUnit)}` : ""}</b></div>)}</div>}
               </div>
-              {positionedPlayers.map((item, index) => <PlayerSeat key={item.player?.id ?? `empty-${index}`} player={item.player} position={item.position} dealer={item.player?.seat === game.dealerSeat} active={item.player?.seat === game.turnSeat} phase={game.phase} />)}
+              {positionedPlayers.map((item, index) => <PlayerSeat key={item.player?.id ?? `empty-${index}`} player={item.player} position={item.position} dealer={item.player?.seat === game.dealerSeat} active={item.player?.seat === game.turnSeat} phase={game.phase} amountUnit={amountUnit} bigBlind={game.room.bigBlind} />)}
               {viewer && (
                 <div className={`hero-seat ${viewer.folded ? "hero-folded" : ""}`}>
                   <div className="hero-cards">{viewer.hole?.length ? viewer.hole.map((card, index) => <Card key={card} code={card} small delay={index * 90} />) : <><Card small hidden /><Card small hidden delay={90} /></>}</div>
-                  <div className="hero-profile"><span className="hero-avatar">{initials(viewer.name)}</span><span><b>你 · {viewer.name}</b><small>{viewer.chips.toLocaleString()} 筹码</small></span></div>
+                  <div className="hero-profile"><span className="hero-avatar">{initials(viewer.name)}</span><span><b>你 · {viewer.name}</b><small>{formatAmount(viewer.chips, game.room.bigBlind, amountUnit)}{amountUnit === "chips" ? " 筹码" : ""}</small></span></div>
                   <span className="hand-strength">{viewer.lastAction || phaseName[game.phase]}</span>
                 </div>
               )}
@@ -564,16 +638,18 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
               <div className="action-buttons">
                 <button className="action-button fold-action" type="button" disabled={!game.validActions.canFold || pending} onClick={() => sendAction("fold")}><span>弃牌</span><kbd>F</kbd></button>
                 <button className="action-button check-action" type="button" disabled={!game.validActions.canCheck || pending} onClick={() => sendAction("check")}><span>过牌</span><kbd>K</kbd></button>
-                <button className="action-button call-action" type="button" disabled={!game.validActions.canCall || pending} onClick={() => sendAction("call")}><span>跟注</span><b>{game.validActions.callAmount}</b></button>
-                <button className="action-button raise-action" type="button" disabled={!game.validActions.canRaise || pending} onClick={() => sendAction("raise", raiseAmount)}><span>加注到</span><b>{raiseAmount.toLocaleString()}</b></button>
+                <button className="action-button call-action" type="button" disabled={!game.validActions.canCall || pending} onClick={() => sendAction("call")}><span>跟注</span><b>{formatAmount(game.validActions.callAmount, game.room.bigBlind, amountUnit)}</b></button>
+                <button className="action-button raise-action" type="button" disabled={!game.validActions.canRaise || pending} onClick={() => sendAction("raise", raiseAmount)}><span>加注到</span><b>{formatAmount(raiseAmount, game.room.bigBlind, amountUnit)}</b></button>
               </div>
             )}
             {game.phase !== "showdown" && (
               <>
-                <div className="pot-presets"><span>底池 <b>{game.pot.toLocaleString()}</b></span><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(1 / 3)}>1/3</button><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(1 / 2)}>1/2</button><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(2 / 3)}>2/3</button><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(1)}>1×</button></div>
-                <div className="raise-control"><button type="button" disabled={!game.validActions.canRaise} onClick={() => setRaiseAmount(game.validActions.minRaiseTo)}>最小</button><input type="range" min={game.validActions.minRaiseTo || 0} max={Math.max(game.validActions.minRaiseTo, game.validActions.maxRaiseTo)} step={game.room.bigBlind} value={raiseAmount} disabled={!game.validActions.canRaise} onChange={(event) => setRaiseAmount(Number(event.target.value))} aria-label="加注筹码数量" /><button type="button" disabled={!game.validActions.canRaise} onClick={() => setRaiseAmount(game.validActions.maxRaiseTo)}>全下</button></div>
+                <div className="pot-presets"><span>底池 <b>{formatAmount(game.pot, game.room.bigBlind, amountUnit)}</b></span><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(1 / 3)}>1/3</button><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(1 / 2)}>1/2</button><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(2 / 3)}>2/3</button><button type="button" disabled={!game.validActions.canRaise} onClick={() => setPotFraction(1)}>1×</button></div>
+                <div className="raise-control"><button type="button" disabled={!game.validActions.canRaise} onClick={() => setRaiseAmount(game.validActions.minRaiseTo)}>最小</button><input type="range" min={game.validActions.minRaiseTo || 0} max={Math.max(game.validActions.minRaiseTo, game.validActions.maxRaiseTo)} step={1} value={game.validActions.canRaise ? raiseAmount : 0} disabled={!game.validActions.canRaise} onChange={(event) => setRaiseAmount(Number(event.target.value))} aria-label="加注筹码数量，最小分度一筹码" /><button type="button" disabled={!game.validActions.canRaise} onClick={() => setRaiseAmount(game.validActions.maxRaiseTo)}>全下</button></div>
+                <div className="precise-pot-control"><label htmlFor="pot-percent"><span>精确底池比例</span><b>{potPercent}%</b></label><input id="pot-percent" type="range" min="1" max="300" step="1" value={potPercent} disabled={!game.validActions.canRaise} onChange={(event) => setPrecisePotPercent(Number(event.target.value))} /><span className="percent-input"><input type="number" min="1" max="300" step="1" value={potPercent} disabled={!game.validActions.canRaise} onChange={(event) => setPrecisePotPercent(Number(event.target.value))} aria-label="底池百分比" />%</span><small>加注到 {formatAmount(raiseAmount, game.room.bigBlind, amountUnit)}</small></div>
               </>
             )}
+            {showGto && <section className="gto-advisor" aria-label="GTO近似策略参考"><div className="gto-advisor-head"><span><b>GTO 参考</b><small>本地近似策略 · 非求解器输出</small></span>{gtoAdvice && <strong>{gtoAdvice.handLabel}</strong>}</div>{gtoAdvice ? <><div className="strategy-mix">{strategyActions.map(({ key, label }) => <div className={`strategy-row ${gtoAdvice.mix[key] === 0 ? "inactive" : ""}`} key={key}><span>{label}</span><i><em style={{ width: `${gtoAdvice.mix[key]}%` }} /></i><b>{gtoAdvice.mix[key]}%</b></div>)}</div><p>{gtoAdvice.summary} · 牌力指数 {gtoAdvice.strength}%{gtoAdvice.potOdds ? ` · 跟注门槛 ${gtoAdvice.potOdds}%` : ""}</p></> : <p className="gto-empty">等待下一手牌或你已经弃牌，当前不显示策略概率。</p>}</section>}
           </div>
         </section>
 
@@ -581,10 +657,10 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <div className="side-tabs"><button className="active" type="button">房间动态</button><button type="button">第 {game.handNumber} 手</button></div>
           <div className="players-card">
             <div className="section-title"><span>本桌玩家</span><small>{game.players.filter((player) => !player.isKicked).length} / {game.room.maxPlayers}</small></div>
-            <div className="mini-player-list">{game.players.filter((player) => !player.isKicked).map((player) => <div className="mini-player" key={player.id}><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}{player.isBot ? " · BOT" : ""}</b><small>{player.chips.toLocaleString()} 筹码{player.pendingRebuy ? ` · 待补 ${player.pendingRebuy.toLocaleString()}` : ""}</small></span><span className="player-row-actions"><i className={player.isOnline ? "online-dot" : "away-dot"} />{game.room.ownerId === user.id && player.id !== user.id && <button type="button" onClick={() => kick(player)} disabled={pending}>移出</button>}</span></div>)}</div>
+            <div className="mini-player-list">{game.players.filter((player) => !player.isKicked).map((player) => <div className="mini-player" key={player.id}><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}{player.isBot ? " · BOT" : ""}</b><small>{formatAmount(player.chips, game.room.bigBlind, amountUnit)}{amountUnit === "chips" ? " 筹码" : ""}{player.pendingRebuy ? ` · 待补 ${formatAmount(player.pendingRebuy, game.room.bigBlind, amountUnit)}` : ""}</small></span><span className="player-row-actions"><i className={player.isOnline ? "online-dot" : "away-dot"} />{game.room.ownerId === user.id && player.id !== user.id && <button type="button" onClick={() => kick(player)} disabled={pending}>移出</button>}</span></div>)}</div>
             {game.room.ownerId === user.id && <div className="host-tools"><button type="button" onClick={copyInvite}>＋ 邀请真人</button><button type="button" onClick={() => manageRoom("add_bot")} disabled={pending || game.players.filter((player) => !player.isKicked).length >= game.room.maxPlayers}>♟ 添加机器人</button></div>}
           </div>
-          <div className="results-card"><div className="section-title"><span>本场输赢</span><small>含当前底池</small></div><div className="results-list">{sessionResults.map((player, index) => <div className="result-row" key={player.id}><span className="result-rank">{index + 1}</span><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}</b><small>带入 {(player.totalBuyIn ?? game.room.startingChips).toLocaleString()}</small></span><strong className={player.net > 0 ? "net-win" : player.net < 0 ? "net-loss" : "net-even"}>{player.net > 0 ? "+" : ""}{player.net.toLocaleString()}</strong></div>)}</div><p className="results-note">当前筹码与已投入底池，减去累计带入筹码</p></div>
+          <div className="results-card"><div className="section-title"><span>本场输赢</span><small>含当前底池</small></div><div className="results-list">{sessionResults.map((player, index) => <div className="result-row" key={player.id}><span className="result-rank">{index + 1}</span><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}</b><small>带入 {formatAmount(player.totalBuyIn ?? game.room.startingChips, game.room.bigBlind, amountUnit)}</small></span><strong className={player.net > 0 ? "net-win" : player.net < 0 ? "net-loss" : "net-even"}>{player.net > 0 ? "+" : ""}{formatAmount(player.net, game.room.bigBlind, amountUnit)}</strong></div>)}</div><p className="results-note">当前筹码与已投入底池，减去累计带入筹码</p></div>
           <div className="log-card"><div className="section-title"><span>行动记录</span><small>服务端</small></div><div className="game-logs">{[...game.logs].reverse().slice(0, 7).map((log) => <p className={log.kind} key={log.id}><time>{new Date(log.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{log.text}</p>)}</div></div>
           <div className="chat-card"><div className="section-title"><span>牌桌聊天</span><small>跨设备同步</small></div><div className="chat-messages">{game.chats.length ? game.chats.map((item) => <div className="chat-message" key={item.id}><span className="chat-avatar" style={{ background: seatColors[Math.abs(item.userId.length) % seatColors.length] }}>{initials(item.name).slice(0, 1)}</span><div><span className="chat-meta"><b>{item.name}</b><time>{new Date(item.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></span><p>{item.text}</p></div></div>) : <p className="empty-chat">还没有消息，先打个招呼吧。</p>}</div><form className="chat-form" onSubmit={sendMessage}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="说点什么…" maxLength={120} aria-label="聊天消息" /><button type="submit" aria-label="发送">↗</button></form></div>
           <a className="leave-room" href="/signout-with-chatgpt?return_to=/">退出账号</a>

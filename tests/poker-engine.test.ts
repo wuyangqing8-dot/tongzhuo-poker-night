@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { potFractionRaiseTarget } from "../lib/bet-sizing";
+import { getStrategyAdvice } from "../lib/strategy-advisor";
 import {
   addBotPlayer,
   applyPlayerAction,
@@ -84,11 +85,29 @@ test("pot fraction shortcut includes the call before sizing a raise", () => {
     callAmount: 200,
     playerStreetBet: 0,
     fraction: 1 / 2,
-    bigBlind: 40,
+    chipStep: 1,
     minRaiseTo: 400,
     maxRaiseTo: 5000,
   });
   assert.equal(target, 800);
+});
+
+test("pot sizing rounds to a single chip and table actions are recorded", () => {
+  const target = potFractionRaiseTarget({
+    pot: 997,
+    callAmount: 17,
+    playerStreetBet: 20,
+    fraction: 0.37,
+    chipStep: 1,
+    minRaiseTo: 80,
+    maxRaiseTo: 5000,
+  });
+  assert.equal(target, 412);
+
+  const state = newThreePlayerGame();
+  applyPlayerAction(state, "human-1", "call");
+  assert.ok(state.actionFeed?.length);
+  assert.equal(state.actionFeed?.[0].playerName, "测试玩家");
 });
 
 test("dealer starts with the supplied photo and only the owner can change it", () => {
@@ -97,4 +116,14 @@ test("dealer starts with the supplied photo and only the owner can change it", (
   setDealerProfile(state, "human-1", { presetId: "lan" });
   assert.equal(state.dealer?.name, "阿岚");
   assert.throws(() => setDealerProfile(state, state.players[1].id, { presetId: "chen" }), /只有房主/);
+});
+
+test("strategy advice produces a legal 100 percent mixed strategy", () => {
+  const premium = getStrategyAdvice({ phase: "preflop", hole: ["AS", "AH"], board: [], pot: 100, callAmount: 40, stack: 4960 });
+  const weak = getStrategyAdvice({ phase: "preflop", hole: ["7S", "2H"], board: [], pot: 100, callAmount: 40, stack: 4960 });
+  assert.ok(premium && weak);
+  assert.equal(Object.values(premium.mix).reduce((sum, value) => sum + value, 0), 100);
+  assert.equal(premium.mix.check, 0);
+  assert.ok(premium.mix.raise > weak.mix.raise);
+  assert.ok(weak.mix.fold > premium.mix.fold);
 });

@@ -148,6 +148,7 @@ export function startHand(state: PokerGameState) {
   state.lastPot = 0;
   state.resultText = "";
   state.nextHandAt = null;
+  state.actionFeed = [];
 
   state.players.forEach((player) => {
     player.streetBet = 0;
@@ -267,16 +268,20 @@ function applyActionInternal(
   requestedAmount?: number,
 ) {
   const callAmount = Math.max(0, state.currentBet - actor.streetBet);
+  let actionLabel = "";
+  let actionAmount = 0;
 
   if (action === "fold") {
     actor.folded = true;
     actor.acted = true;
     actor.lastAction = "弃牌";
+    actionLabel = "弃牌";
     addLog(state, `${actor.name} 弃牌`);
   } else if (action === "check") {
     if (callAmount !== 0) throw new Error("当前不能过牌");
     actor.acted = true;
     actor.lastAction = "过牌";
+    actionLabel = "过牌";
     addLog(state, `${actor.name} 过牌`);
   } else if (action === "call") {
     if (callAmount <= 0) throw new Error("当前无需跟注");
@@ -287,6 +292,8 @@ function applyActionInternal(
     actor.allIn = actor.chips === 0;
     actor.acted = true;
     actor.lastAction = actor.allIn ? `全下 ${paid}` : `跟注 ${paid}`;
+    actionLabel = actor.allIn ? "全下" : "跟注";
+    actionAmount = paid;
     addLog(state, `${actor.name} ${actor.allIn ? "全下" : "跟注"} ${paid}`);
   } else {
     const maxTarget = actor.streetBet + actor.chips;
@@ -310,10 +317,23 @@ function applyActionInternal(
     if (raiseSize >= state.minRaise) state.minRaise = raiseSize;
     state.currentBet = target;
     actor.lastAction = actor.allIn ? `全下 ${target}` : `加注到 ${target}`;
+    actionLabel = actor.allIn ? "全下" : "加注到";
+    actionAmount = target;
     addLog(state, `${actor.name} ${actor.allIn ? "全下" : "加注到"} ${target}`);
   }
 
-  state.updatedAt = Date.now();
+  const actionAt = Date.now();
+  state.actionFeed = [...(state.actionFeed ?? []), {
+    id: id("move"),
+    playerId: actor.id,
+    playerName: actor.name,
+    isBot: actor.isBot,
+    action,
+    label: actionLabel,
+    amount: actionAmount,
+    at: actionAt,
+  }].slice(-6);
+  state.updatedAt = actionAt;
   advanceAfterAction(state, actor.seat);
 }
 
@@ -545,6 +565,7 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
     nextHandAt: state.nextHandAt,
     resultText: state.resultText,
     dealer: state.dealer ?? DEFAULT_DEALER,
+    actionFeed: (state.actionFeed ?? []).slice(-6),
   };
 }
 
@@ -629,6 +650,7 @@ export function createInitialState(input: {
     lastPot: 0,
     resultText: "",
     dealer: { ...DEFAULT_DEALER },
+    actionFeed: [],
     createdAt: now,
     updatedAt: now,
   };

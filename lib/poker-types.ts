@@ -11,6 +11,17 @@ export type DealerProfile = {
   isCustom: boolean;
 };
 
+export type TableActionEvent = {
+  id: string;
+  playerId: string;
+  playerName: string;
+  isBot: boolean;
+  action: PlayerAction;
+  label: string;
+  amount: number;
+  at: number;
+};
+
 export type GamePlayer = {
   id: string;
   name: string;
@@ -72,6 +83,7 @@ export type PokerGameState = {
   lastPot: number;
   resultText: string;
   dealer?: DealerProfile;
+  actionFeed?: TableActionEvent[];
   createdAt: number;
   updatedAt: number;
 };
@@ -119,6 +131,7 @@ export type PublicGameView = {
   nextHandAt: number | null;
   resultText: string;
   dealer: DealerProfile;
+  actionFeed: TableActionEvent[];
 };
 
 export type AuthenticatedUser = {
