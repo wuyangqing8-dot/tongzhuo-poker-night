@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { SESSION_TTL_MS } from "./session-auth";
 import type { AuthenticatedUser, PokerGameState } from "./poker-types";
 import type { PlayerProfile, ProfileHandResult, ProfileRoomSummary } from "./profile-types";
 
@@ -81,6 +82,20 @@ export async function ensurePokerSchema() {
       database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_hand_results_unique_player_hand ON hand_results(room_id, hand_number, user_id)"),
       database.prepare("CREATE INDEX IF NOT EXISTS idx_hand_results_user_completed ON hand_results(user_id, completed_at)"),
       database.prepare("CREATE INDEX IF NOT EXISTS idx_hand_results_room_hand ON hand_results(room_id, hand_number)"),
+      database.prepare(`CREATE TABLE IF NOT EXISTS user_credentials (
+        user_id TEXT PRIMARY KEY NOT NULL,
+        email TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`),
+      database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_user_credentials_email ON user_credentials(email)"),
+      database.prepare(`CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY NOT NULL,
+        user_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL
+      )`),
+      database.prepare("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)"),
     ]);
   })().catch((error) => {
     schemaReady = null;
@@ -99,6 +114,73 @@ export async function upsertUser(user: AuthenticatedUser) {
       display_name = excluded.display_name,
       last_seen_at = excluded.last_seen_at`)
     .bind(user.id, user.email, user.displayName, now, now).run();
+}
+
+export async function createUserRecord(id: string, email: string, displayName: string) {
+  await ensurePokerSchema();
+  const now = Date.now();
+  await db().prepare(`INSERT INTO users (id, email, display_name, created_at, last_seen_at)
+    VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, email, displayName, now, now).run();
+}
+
+export async function loadUserById(userId: string): Promise<AuthenticatedUser | null> {
+  await ensurePokerSchema();
+  const row = await db().prepare("SELECT id, email, display_name FROM users WHERE id = ? LIMIT 1")
+    .bind(userId).first<{ id: string; email: string; display_name: string }>();
+  if (!row) return null;
+  return { id: row.id, email: row.email, displayName: row.display_name };
+}
+
+export async function findCredentialByEmail(email: string): Promise<{ userId: string; passwordHash: string } | null> {
+  await ensurePokerSchema();
+  const row = await db().prepare("SELECT user_id, password_hash FROM user_credentials WHERE email = ? LIMIT 1")
+    .bind(email).first<{ user_id: string; password_hash: string }>();
+  if (!row) return null;
+  return { userId: row.user_id, passwordHash: row.password_hash };
+}
+
+export async function createCredential(userId: string, email: string, passwordHash: string) {
+  await ensurePokerSchema();
+  const now = Date.now();
+  await db().prepare(`INSERT INTO user_credentials (user_id, email, password_hash, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      email = excluded.email,
+      password_hash = excluded.password_hash,
+      updated_at = excluded.updated_at`)
+    .bind(userId, email, passwordHash, now).run();
+}
+
+export async function createSession(userId: string): Promise<string> {
+  await ensurePokerSchema();
+  const token = randomToken(24);
+  const now = Date.now();
+  const expiresAt = now + SESSION_TTL_MS;
+  await db().prepare(`INSERT INTO sessions (token, user_id, created_at, expires_at)
+    VALUES (?, ?, ?, ?)`)
+    .bind(token, userId, now, expiresAt).run();
+  return token;
+}
+
+export async function loadUserBySession(token: string): Promise<AuthenticatedUser | null> {
+  await ensurePokerSchema();
+  const row = await db().prepare(`SELECT s.user_id AS user_id, s.expires_at AS expires_at,
+      u.email AS email, u.display_name AS display_name
+    FROM sessions s
+    JOIN users u ON u.id = s.user_id
+    WHERE s.token = ? LIMIT 1`)
+    .bind(token).first<{ user_id: string; expires_at: number; email: string; display_name: string }>();
+  if (!row) return null;
+  if (row.expires_at <= Date.now()) {
+    await db().prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    return null;
+  }
+  return { id: row.user_id, email: row.email, displayName: row.display_name };
+}
+
+export async function deleteSession(token: string) {
+  await db().prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
 }
 
 function parseRoom(row: RoomRow | null) {

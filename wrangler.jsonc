@@ -1,0 +1,22 @@
+{
+  // Cloudflare 生产部署配置（VINEXT 官方使用 wrangler.jsonc，不是 wrangler.toml）。
+  // 部署命令：npx @vinext/cloudflare deploy
+  // 认证方式（二选一）：
+  //   1) 本地终端运行 `wrangler login`（浏览器授权，token 会被缓存）
+  //   2) 设置环境变量 CLOUDFLARE_API_TOKEN（需 Workers 编辑权限）+ CLOUDFLARE_ACCOUNT_ID
+  "name": "tongzhuo-poker-night",
+  "compatibility_date": "2025-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // 若未设置环境变量 CLOUDFLARE_ACCOUNT_ID，可在此直接填入你的 Cloudflare 账号 ID：
+  // "account_id": "在此填入 Cloudflare 账号 ID",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tongzhuo-poker-db",
+      // 必须替换为真实 D1 数据库 ID。先运行：
+      //   npx wrangler d1 create tongzhuo-poker-db
+      // 把回显的 database_id 粘到下面（保留引号与 UUID 格式）。
+      "database_id": "0db20bcf-e521-438b-b5e1-878ed3ae9b2d"
+    }
+  ]
+}

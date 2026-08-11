@@ -23,7 +23,7 @@ test("server-renders a real sign-in and registration entry for anonymous visitor
   assert.match(html, /登录已有账号/);
   assert.match(html, /注册新账号/);
   assert.match(html, /TONG-INVITE/);
-  assert.match(html, /signin-with-chatgpt/);
+  assert.match(html, /\/login/);
   assert.match(html, /BTN/);
   assert.match(html, /BB/);
 });

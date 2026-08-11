@@ -40,3 +40,10 @@ yarn-error.log*
 /.wrangler/
 /outputs/
 /work/
+
+# temporary build/cache backups created during local development
+dist_bak_*/
+.vinext_bak_*/
+.wrangler_bak_*/
+.build-backups/
+.build-trash/

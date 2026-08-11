@@ -82,3 +82,21 @@ export const handResults = sqliteTable(
     index("idx_hand_results_room_hand").on(table.roomId, table.handNumber),
   ],
 );
+
+export const userCredentials = sqliteTable("user_credentials", {
+  userId: text("user_id").primaryKey().notNull(),
+  email: text("email").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [uniqueIndex("idx_user_credentials_email").on(table.email)]);
+
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    token: text("token").primaryKey().notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: integer("created_at").notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [index("idx_sessions_user").on(table.userId)],
+);

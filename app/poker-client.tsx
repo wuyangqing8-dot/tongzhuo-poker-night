@@ -215,7 +215,7 @@ async function apiRequest(path: string, init?: RequestInit) {
   });
   const data = await response.json() as { error?: string; game?: PublicGameView; needsRoom?: boolean; needsJoin?: boolean; left?: boolean };
   if (response.status === 401) {
-    window.location.href = `/signin-with-chatgpt?return_to=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+    window.location.href = `/login?return_to=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     throw new Error("需要登录");
   }
   if (!response.ok) throw new Error(data.error || "请求失败");
@@ -734,7 +734,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             {error && <p className="form-error">{error}</p>}
             <button className="primary-action" type="submit" disabled={pending}>{pending ? "正在连接…" : lobbyMode === "join" ? "加入并入座" : "创建并开始"}</button>
           </form>
-          <div className="account-strip"><span className="my-avatar">{initials(user.displayName)}</span><span><b>{user.displayName}</b><small>{user.email}</small></span><span className="account-links"><a href="/profile">个人战绩</a><a href="/signout-with-chatgpt?return_to=/">退出</a></span></div>
+          <div className="account-strip"><span className="my-avatar">{initials(user.displayName)}</span><span><b>{user.displayName}</b><small>{user.email}</small></span><span className="account-links"><a href="/profile">个人战绩</a><a href="/api/auth/logout?return_to=/">退出</a></span></div>
           <button className="lucky-entry-link" type="button" onClick={() => { setLobbyMode("create"); setRoomMode("party"); }}><span>🎡</span><b>创建线上娱乐德州</b><small>条件由房主选择，服务器自动判定并真实执行效果</small></button>
         </section>
         <p className="lobby-note">娱乐积分，无现金充值与提现</p>
@@ -881,7 +881,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <div className="chat-card"><div className="section-title"><span>牌桌聊天</span><small>跨设备同步</small></div><div className="chat-messages">{game.chats.length ? game.chats.map((item) => <div className="chat-message" key={item.id}><span className="chat-avatar" style={{ background: seatColors[Math.abs(item.userId.length) % seatColors.length] }}>{initials(item.name).slice(0, 1)}</span><div><span className="chat-meta"><b>{item.name}</b><time>{new Date(item.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></span><p>{item.text}</p></div></div>) : <p className="empty-chat">还没有消息，先打个招呼吧。</p>}</div><form className="chat-form" onSubmit={sendMessage}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="说点什么…" maxLength={120} aria-label="聊天消息" /><button type="submit" aria-label="发送">↗</button></form></div>
           <div className="room-exit-actions">
             <button className="leave-table-button" type="button" onClick={leaveTable} disabled={pending}>离开牌桌</button>
-            <a className="leave-room" href="/signout-with-chatgpt?return_to=/">退出账号</a>
+            <a className="leave-room" href="/api/auth/logout?return_to=/">退出账号</a>
           </div>
         </aside>
       </div>

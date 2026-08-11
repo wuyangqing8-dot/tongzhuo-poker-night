@@ -14,7 +14,7 @@ import {
 } from "../../../lib/poker-store";
 
 export async function POST(request: Request) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return unauthorized();
 
   try {

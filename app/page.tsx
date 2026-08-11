@@ -1,5 +1,5 @@
 import AuthLanding from "./auth-landing";
-import { chatGPTSignInPath, getChatGPTUser } from "./chatgpt-auth";
+import { getChatGPTUser } from "./chatgpt-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,10 +13,14 @@ export default async function Home({ searchParams }: PageProps) {
   const tablePath = normalizedRoom ? `/table?room=${encodeURIComponent(normalizedRoom)}` : "/table";
   const user = await getChatGPTUser();
 
+  const loginPath = `/login?return_to=${encodeURIComponent(tablePath)}`;
+  const registerPath = `/login?mode=register&return_to=${encodeURIComponent(tablePath)}`;
+
   return (
     <AuthLanding
       roomCode={normalizedRoom}
-      signInPath={chatGPTSignInPath(tablePath)}
+      signInPath={loginPath}
+      signUpPath={registerPath}
       tablePath={tablePath}
       user={user}
     />

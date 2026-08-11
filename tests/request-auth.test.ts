@@ -2,22 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getRequestUser } from "../lib/request-auth";
 
-test("localhost requests use the local demo identity", () => {
-  assert.deepEqual(getRequestUser(new Request("http://localhost:3000/api/game")), {
+test("localhost requests use the local demo identity", async () => {
+  assert.deepEqual(await getRequestUser(new Request("http://localhost:3000/api/game")), {
     id: "local-demo-user",
     email: "local@pokernight.test",
     displayName: "本地房主",
   });
 });
 
-test("remote requests without platform identity remain unauthenticated", () => {
+test("remote requests without platform identity remain unauthenticated", async () => {
   assert.equal(
-    getRequestUser(new Request("https://example.com/api/game")),
+    await getRequestUser(new Request("https://example.com/api/game")),
     null,
   );
 });
 
-test("platform identity takes precedence on localhost", () => {
+test("platform identity takes precedence on localhost", async () => {
   const request = new Request("http://localhost:3000/api/game", {
     headers: {
       "oai-authenticated-user-id": "real-user",
@@ -27,7 +27,7 @@ test("platform identity takes precedence on localhost", () => {
     },
   });
 
-  assert.deepEqual(getRequestUser(request), {
+  assert.deepEqual(await getRequestUser(request), {
     id: "real-user",
     email: "real@example.com",
     displayName: "真实玩家",

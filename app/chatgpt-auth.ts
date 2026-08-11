@@ -1,6 +1,7 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { isLocalHost, LOCAL_DEMO_USER } from "../lib/local-auth";
+import { SESSION_COOKIE } from "../lib/session-auth";
 
 export type ChatGPTUser = {
   userId: string;
@@ -20,6 +21,27 @@ const SIGN_OUT_PATH = "/signout-with-chatgpt";
 const CALLBACK_PATH = "/callback";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
+  // A session cookie from this site's own register/login flow takes priority,
+  // so accounts created here work without the ChatGPT platform headers.
+  try {
+    const cookieStore = await cookies();
+    const sessionToken = cookieStore.get(SESSION_COOKIE)?.value;
+    if (sessionToken) {
+      const { loadUserBySession } = await import("../lib/poker-store");
+      const sessionUser = await loadUserBySession(sessionToken);
+      if (sessionUser) {
+        return {
+          userId: sessionUser.id,
+          displayName: sessionUser.displayName,
+          email: sessionUser.email,
+          fullName: null,
+        };
+      }
+    }
+  } catch {
+    // Session store unavailable on this surface; fall through to header identity.
+  }
+
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
@@ -62,7 +84,7 @@ export async function requireChatGPTUser(
 
 export function chatGPTSignInPath(returnTo: string): string {
   const safeReturnTo = safeRelativeReturnPath(returnTo);
-  return `${SIGN_IN_PATH}?return_to=${encodeURIComponent(safeReturnTo)}`;
+  return `/login?return_to=${encodeURIComponent(safeReturnTo)}`;
 }
 
 export function chatGPTSignOutPath(returnTo = "/"): string {

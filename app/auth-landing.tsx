@@ -4,6 +4,7 @@ type AuthLandingProps = {
   user: ChatGPTUser | null;
   tablePath: string;
   signInPath: string;
+  signUpPath?: string;
   roomCode?: string;
 };
 
@@ -16,7 +17,7 @@ const demoSeats = [
   { label: "BB", name: "你", className: "entry-seat-bb" },
 ];
 
-export default function AuthLanding({ user, tablePath, signInPath, roomCode }: AuthLandingProps) {
+export default function AuthLanding({ user, tablePath, signInPath, signUpPath, roomCode }: AuthLandingProps) {
   return (
     <main className="entry-page">
       <header className="entry-header">
@@ -41,7 +42,7 @@ export default function AuthLanding({ user, tablePath, signInPath, roomCode }: A
               <div className="entry-account-guide"><b>要邀请同学一起玩？</b><span>把房间邀请链接发给同学，他们会用自己的邮箱注册 / 登录，不会进入你的账号。</span></div>
             </>
           ) : (
-            <div className="entry-auth-note"><span>✦</span><p><b>没有单独的牌桌密码</b><small>登录和注册由官方账号页面完成；本站不会保存你的邮箱密码。</small></p></div>
+            <div className="entry-auth-note"><span>✦</span><p><b>本站独立账号</b><small>用邮箱 + 密码在本站注册专属账号，密码经单向加密存储，服务器不以明文保存或传输。</small></p></div>
           )}
 
           <div className="entry-actions">
@@ -50,10 +51,10 @@ export default function AuthLanding({ user, tablePath, signInPath, roomCode }: A
               <a className="entry-secondary" href="/profile">查看我的战绩</a>
             </> : <>
               <a className="entry-primary" href={signInPath}>登录已有账号<span>→</span></a>
-              <a className="entry-secondary" href={signInPath}>注册新账号</a>
+              <a className="entry-secondary" href={signUpPath ?? signInPath}>注册新账号</a>
             </>}
           </div>
-          {!user && <small className="entry-auth-help">两个入口都会打开官方登录页面。首次使用请选择“注册”，用邮箱创建账号；完成后会自动返回同桌。</small>}
+          {!user && <small className="entry-auth-help">两个入口都指向本站登录页；首次使用请选择“注册”，用邮箱 + 密码创建账号，完成后会自动返回同桌。</small>}
 
           <div className="entry-trust-row"><span><i>01</i><b>邮箱身份</b><small>一人一份独立资料</small></span><span><i>02</i><b>服务器发牌</b><small>设备间实时同步</small></span><span><i>03</i><b>长期战绩</b><small>逐手记录输赢</small></span></div>
         </div>

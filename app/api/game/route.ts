@@ -31,7 +31,7 @@ async function resolveRoom(userId: string, code?: string | null) {
 }
 
 export async function GET(request: Request) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return unauthorized();
   try {
     await upsertUser(user);
@@ -64,7 +64,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const user = getRequestUser(request);
+  const user = await getRequestUser(request);
   if (!user) return unauthorized();
   try {
     const payload = await request.json() as {

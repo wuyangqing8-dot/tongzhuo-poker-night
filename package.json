@@ -11,7 +11,9 @@
     "start": "vinext start",
     "test": "vinext build && tsx --test tests/poker-engine.test.ts tests/lucky-wheel.test.ts tests/request-auth.test.ts && node --test tests/rendered-html.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:create": "wrangler d1 create tongzhuo-poker-db",
+    "deploy:cf": "npx @vinext/cloudflare deploy"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

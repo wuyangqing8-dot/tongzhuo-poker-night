@@ -27,7 +27,7 @@ export default function ProfileClient({ user }: { user: AuthenticatedUser }) {
     fetch("/api/profile", { credentials: "same-origin" })
       .then(async (response) => {
         if (response.status === 401) {
-          window.location.href = "/signin-with-chatgpt?return_to=%2Fprofile";
+          window.location.href = "/login?return_to=%2Fprofile";
           return null;
         }
         const data = await response.json() as { profile?: PlayerProfile; error?: string };
@@ -49,7 +49,7 @@ export default function ProfileClient({ user }: { user: AuthenticatedUser }) {
     <main className="profile-page">
       <header className="profile-topbar">
         <a className="profile-brand" href="/"><span>♠</span><b>同桌</b><small>PLAYER PROFILE</small></a>
-        <nav><a href="/table">返回牌桌</a><a href="/lucky">娱乐转盘</a><a href="/signout-with-chatgpt?return_to=/">退出账号</a></nav>
+        <nav><a href="/table">返回牌桌</a><a href="/lucky">娱乐转盘</a><a href="/api/auth/logout?return_to=/">退出账号</a></nav>
       </header>
 
       <section className="profile-shell">
