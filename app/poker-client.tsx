@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, FormEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AuthenticatedUser,
   CardCode,
@@ -255,6 +255,38 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const polling = useRef(false);
   const previousDealState = useRef<{ handNumber: number; boardCount: number } | null>(null);
   const previousPartyEventId = useRef<string | null>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const resizing = useRef(false);
+
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("pn-side-w") : null;
+    if (saved && layoutRef.current) layoutRef.current.style.setProperty("--side-w", `${saved}px`);
+  }, []);
+
+  const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const layout = layoutRef.current;
+    if (!layout) return;
+    const handle = event.currentTarget;
+    handle.classList.add("dragging");
+    resizing.current = true;
+    const onMove = (moveEvent: PointerEvent) => {
+      if (!resizing.current || !layout) return;
+      const rect = layout.getBoundingClientRect();
+      const next = Math.max(240, Math.min(560, rect.right - moveEvent.clientX));
+      layout.style.setProperty("--side-w", `${next}px`);
+    };
+    const onUp = () => {
+      resizing.current = false;
+      handle.classList.remove("dragging");
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const current = layout.style.getPropertyValue("--side-w");
+      if (current) localStorage.setItem("pn-side-w", current.replace("px", ""));
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
 
   const notify = useCallback((text: string) => {
     setToast(text);
@@ -776,7 +808,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
 
       {error && <button className="game-error" type="button" onClick={() => setError("")}>同步提示：{error} ×</button>}
 
-      <div className="game-layout">
+      <div className="game-layout" ref={layoutRef}>
         <section className="table-panel" aria-label="实时德州扑克牌桌">
           <div className={`turn-banner ${game.paused ? "is-paused" : ""}`}>
             <div><span className="turn-label">{game.paused ? "牌桌已暂停" : game.phase === "showdown" ? game.resultText : game.validActions.isYourTurn ? "轮到你了" : turnPlayer ? `${turnPlayer.name} 行动中` : "等待牌局开始"}</span><span className="turn-hint">{game.paused ? `${game.pausedByName ?? "房主"} 暂停了发牌和倒计时` : game.validActions.isYourTurn ? game.validActions.callAmount ? `需跟注 ${formatAmount(game.validActions.callAmount, game.room.bigBlind, amountUnit)}` : "可以过牌或加注" : "状态会自动同步"}</span></div>
@@ -842,6 +874,8 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             {showGto && <section className="gto-advisor" aria-label="GTO近似策略参考"><div className="gto-advisor-head"><span><b>GTO 参考</b><small>本地近似策略 · 非求解器输出</small></span>{gtoAdvice && <strong>{gtoAdvice.handLabel}</strong>}</div>{gtoAdvice ? <><div className="strategy-mix">{strategyActions.map(({ key, label }) => <div className={`strategy-row ${gtoAdvice.mix[key] === 0 ? "inactive" : ""}`} key={key}><span>{label}</span><i><em style={{ width: `${gtoAdvice.mix[key]}%` }} /></i><b>{gtoAdvice.mix[key]}%</b></div>)}</div><p>{gtoAdvice.summary} · 牌力指数 {gtoAdvice.strength}%{gtoAdvice.potOdds ? ` · 跟注门槛 ${gtoAdvice.potOdds}%` : ""}</p></> : <p className="gto-empty">等待下一手牌或你已经弃牌，当前不显示策略概率。</p>}</section>}
           </div>
         </section>
+
+        <div className="panel-resizer" role="separator" aria-orientation="vertical" aria-label="拖动调节右侧信息栏宽度" onPointerDown={startResize} />
 
         <aside className={`side-panel ${showMobilePanel ? "mobile-panel-open" : ""}`}>
           <div className="side-tabs"><button className="active" type="button">房间动态</button><button type="button">第 {game.handNumber} 手</button></div>
