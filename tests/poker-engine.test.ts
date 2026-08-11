@@ -12,8 +12,10 @@ import {
   createInitialState,
   kickPlayer,
   leavePlayer,
+  maybeAdvanceGame,
   requestRebuy,
   setDealerProfile,
+  setTablePaused,
   spinPartyWheel,
   startHand,
   toPublicView,
@@ -159,6 +161,36 @@ test("strategy advice produces a legal 100 percent mixed strategy", () => {
   assert.equal(premium.mix.check, 0);
   assert.ok(premium.mix.raise > weak.mix.raise);
   assert.ok(weak.mix.fold > premium.mix.fold);
+});
+
+test("only the host can pause the table and timers resume from the frozen remainder", () => {
+  const state = newThreePlayerGame();
+  const owner = state.players.find((player) => player.id === "human-1")!;
+  const other = state.players.find((player) => player.id !== owner.id)!;
+  const turnSeatBefore = state.turnSeat;
+  const deadlineBefore = state.actionDeadline!;
+
+  assert.throws(() => setTablePaused(state, other.id, true), /只有房主/);
+  setTablePaused(state, owner.id, true);
+  assert.equal(state.paused, true);
+  assert.equal(toPublicView(state, owner.id).validActions.isYourTurn, false);
+  assert.throws(() => applyPlayerAction(state, owner.id, "fold"), /牌桌已暂停/);
+
+  state.actionDeadline = Date.now() - 1;
+  const handBefore = state.handNumber;
+  maybeAdvanceGame(state);
+  assert.equal(state.turnSeat, turnSeatBefore);
+  assert.equal(state.handNumber, handBefore);
+  state.phase = "showdown";
+  state.nextHandAt = Date.now() - 1;
+  maybeAdvanceGame(state);
+  assert.equal(state.handNumber, handBefore);
+
+  state.actionDeadline = deadlineBefore;
+  state.pausedAt = Date.now() - 5_000;
+  setTablePaused(state, owner.id, false);
+  assert.equal(state.paused, false);
+  assert.ok((state.actionDeadline ?? 0) >= deadlineBefore + 4_900);
 });
 
 test("party mode awards a wheel credit from a real showdown trigger", () => {

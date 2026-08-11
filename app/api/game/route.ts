@@ -8,6 +8,7 @@ import {
   maybeAdvanceGame,
   requestRebuy,
   setDealerProfile,
+  setTablePaused,
   spinPartyWheel,
   startHand,
   toPublicView,
@@ -63,12 +64,13 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json() as {
       code?: string;
-      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "leave" | "add_bot" | "set_dealer" | "party_spin" | "party_config" | "party_use";
+      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "leave" | "add_bot" | "set_dealer" | "party_spin" | "party_config" | "party_use" | "table_pause";
       action?: PlayerAction;
       amount?: number;
       message?: string;
       targetId?: string;
       effectInstanceId?: string;
+      paused?: boolean;
       triggers?: PartyTriggerId[];
       dealer?: { presetId?: string; image?: string };
     };
@@ -112,6 +114,9 @@ export async function POST(request: Request) {
     } else if (payload.type === "set_dealer") {
       setDealerProfile(room.state, user.id, payload.dealer ?? {});
       await recordAction(room.state, user.id, "set_dealer");
+    } else if (payload.type === "table_pause") {
+      setTablePaused(room.state, user.id, payload.paused !== false);
+      await recordAction(room.state, user.id, payload.paused === false ? "resume_table" : "pause_table");
     } else if (payload.type === "party_config") {
       configurePartyRules(room.state, user.id, payload.triggers ?? []);
       await recordAction(room.state, user.id, "party_config");

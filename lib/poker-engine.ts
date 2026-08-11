@@ -115,6 +115,12 @@ function handReadyPlayers(state: PokerGameState) {
   return state.players.filter((player) => player.chips > 0);
 }
 
+function ensurePauseState(state: PokerGameState) {
+  state.paused ??= false;
+  state.pausedAt ??= null;
+  state.pausedByName ??= null;
+}
+
 function ensurePartyPlayer(state: PokerGameState, playerId: string): PartyPlayerState {
   const party = ensurePartyState(state);
   party.playerStates[playerId] ??= { playerId, credits: 0, achievementCount: 0, effects: [] };
@@ -349,6 +355,8 @@ function applyPartyHoleEffects(state: PokerGameState, ready: GamePlayer[]) {
 }
 
 export function startHand(state: PokerGameState) {
+  ensurePauseState(state);
+  if (state.paused) throw new Error("牌桌已暂停，请先由房主恢复牌局");
   state.roomMode ??= "classic";
   state.players = state.players.filter((player) => !player.isKicked);
   state.players.forEach((player) => {
@@ -679,6 +687,8 @@ export function applyPlayerAction(
   action: PlayerAction,
   amount?: number,
 ) {
+  ensurePauseState(state);
+  if (state.paused) throw new Error("牌桌已暂停，暂时不能操作");
   if (!["preflop", "flop", "turn", "river"].includes(state.phase)) {
     throw new Error("当前牌局不能操作");
   }
@@ -712,6 +722,8 @@ function botDecision(state: PokerGameState, bot: GamePlayer): { action: PlayerAc
 }
 
 export function runBots(state: PokerGameState) {
+  ensurePauseState(state);
+  if (state.paused) return state;
   let guard = 0;
   while (state.turnSeat !== null && guard < 40) {
     const bot = state.players.find((player) => player.seat === state.turnSeat);
@@ -860,6 +872,30 @@ export function configurePartyRules(state: PokerGameState, actorId: string, trig
   return valid;
 }
 
+export function setTablePaused(state: PokerGameState, actorId: string, paused: boolean) {
+  ensurePauseState(state);
+  if (state.ownerId !== actorId) throw new Error("只有房主可以暂停或恢复牌局");
+  if (state.paused === paused) return state;
+  const owner = state.players.find((player) => player.id === actorId);
+  const now = Date.now();
+  if (paused) {
+    state.paused = true;
+    state.pausedAt = now;
+    state.pausedByName = owner?.name ?? "房主";
+    addLog(state, `${state.pausedByName} 暂停了牌局，发牌与倒计时已冻结`, "system");
+  } else {
+    const pausedDuration = state.pausedAt ? Math.max(0, now - state.pausedAt) : 0;
+    if (state.actionDeadline) state.actionDeadline += pausedDuration;
+    if (state.nextHandAt) state.nextHandAt += pausedDuration;
+    state.paused = false;
+    state.pausedAt = null;
+    state.pausedByName = null;
+    addLog(state, `${owner?.name ?? "房主"} 恢复了牌局，倒计时继续`, "system");
+  }
+  state.updatedAt = now;
+  return state;
+}
+
 function partyUseWindowOpen(state: PokerGameState, effect: PartyRuntimeEffect) {
   const definition = partyEffect(effect.effectId);
   if (!definition?.useWindow) return false;
@@ -873,6 +909,8 @@ function partyUseWindowOpen(state: PokerGameState, effect: PartyRuntimeEffect) {
 }
 
 export function activatePartyEffect(state: PokerGameState, actorId: string, effectInstanceId: string) {
+  ensurePauseState(state);
+  if (state.paused) throw new Error("牌桌已暂停，恢复后才能使用效果");
   if ((state.roomMode ?? "classic") !== "party") throw new Error("当前不是娱乐德州房间");
   const party = ensurePartyState(state);
   const owner = state.players.find((player) => party.playerStates[player.id]?.effects.some((effect) => effect.id === effectInstanceId));
@@ -1052,6 +1090,8 @@ function finishShowdown(state: PokerGameState) {
 }
 
 export function maybeAdvanceGame(state: PokerGameState) {
+  ensurePauseState(state);
+  if (state.paused) return state;
   const now = Date.now();
   if (state.phase === "showdown" && state.nextHandAt && now >= state.nextHandAt) return startHand(state);
   if (state.turnSeat !== null && state.actionDeadline && now >= state.actionDeadline) {
@@ -1072,8 +1112,9 @@ export function potSize(state: PokerGameState) {
 }
 
 export function toPublicView(state: PokerGameState, viewerId: string): PublicGameView {
+  ensurePauseState(state);
   const viewer = state.players.find((player) => player.id === viewerId);
-  const isYourTurn = viewer?.seat === state.turnSeat && !!viewer && !viewer.folded && !viewer.allIn;
+  const isYourTurn = !state.paused && viewer?.seat === state.turnSeat && !!viewer && !viewer.folded && !viewer.allIn;
   const callAmount = viewer ? Math.max(0, state.currentBet - viewer.streetBet) : 0;
   const maxRaiseTo = viewer ? viewer.streetBet + viewer.chips : 0;
   const minRaiseTo = Math.min(maxRaiseTo, state.currentBet + state.minRaise);
@@ -1134,6 +1175,9 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
     },
     actionDeadline: state.actionDeadline,
     nextHandAt: state.nextHandAt,
+    paused: state.paused,
+    pausedAt: state.pausedAt,
+    pausedByName: state.pausedByName,
     resultText: state.resultText,
     dealer: state.dealer ?? DEFAULT_DEALER,
     actionFeed: (state.actionFeed ?? []).slice(-6),
@@ -1226,6 +1270,9 @@ export function createInitialState(input: {
     chats: [],
     actionDeadline: null,
     nextHandAt: null,
+    paused: false,
+    pausedAt: null,
+    pausedByName: null,
     lastPot: 0,
     resultText: "",
     dealer: { ...DEFAULT_DEALER },

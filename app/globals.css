@@ -223,6 +223,13 @@ select:focus-visible {
   box-shadow: 0 0 0 4px rgba(75, 154, 111, 0.14);
   animation: sync-pulse 2s infinite;
 }
+.server-badge.paused { color: #a34a35; }
+.server-badge.paused i { background: #d46147; box-shadow: 0 0 0 4px rgba(212,97,71,.14); animation: none; }
+
+.pause-table-button { min-height: 34px; padding: 0 11px; border: 1px solid #c9a99f; border-radius: 9px; background: #fff8f5; color: #8a4939; font-size: 9px; font-weight: 850; cursor: pointer; }
+.pause-table-button:hover { border-color: #bb6049; color: #9c3f2c; }
+.pause-table-button.resume { border-color: #4f8069; background: #eaf3ed; color: #35664f; box-shadow: 0 0 0 3px rgba(79,128,105,.1); }
+.pause-table-button:disabled { opacity: .5; cursor: wait; }
 
 @keyframes sync-pulse {
   50% { box-shadow: 0 0 0 7px rgba(75, 154, 111, 0); }
@@ -455,6 +462,9 @@ select:focus-visible {
   align-items: center;
   gap: 6px 18px;
 }
+.turn-banner.is-paused { background: #4d3029; }
+.turn-banner.is-paused .timer { color: #ffe0a8; letter-spacing: .08em; }
+.turn-banner.is-paused .timer-track span { background: #d6a64b; transition: none; }
 
 .turn-banner > div:first-child {
   display: flex;
@@ -511,6 +521,13 @@ select:focus-visible {
   border-radius: 15px;
   pointer-events: none;
 }
+
+.table-paused-overlay { position: absolute; z-index: 32; inset: 0; padding: 120px 24px 80px; display: grid; place-content: center; justify-items: center; gap: 7px; color: #fff6e7; text-align: center; background: radial-gradient(circle at center,rgba(54,35,30,.9),rgba(34,27,24,.72) 53%,rgba(30,25,23,.35)); backdrop-filter: grayscale(.45) blur(1.5px); }
+.table-paused-overlay > span { width: 66px; height: 66px; display: grid; place-items: center; color: #321f1a; font: 900 30px/1 Georgia,serif; border: 4px solid #e5c276; border-radius: 50%; background: #f1d99d; box-shadow: 0 0 0 9px rgba(229,194,118,.13),0 16px 35px #0007; animation: pauseBreath 2s ease-in-out infinite; }
+.table-paused-overlay b { margin-top: 8px; color: #ffe8b8; font: 800 24px/1.2 Georgia,"Songti SC",serif; }
+.table-paused-overlay p { max-width: 390px; margin: 0; color: #ddcec5; font-size: 10px; line-height: 1.55; }
+.table-paused-overlay small { color: #bda895; font-size: 8px; }
+@keyframes pauseBreath { 50% { transform: scale(1.06); box-shadow: 0 0 0 15px rgba(229,194,118,0),0 16px 35px #0007; } }
 
 .table-dealer {
   position: absolute;
@@ -2362,6 +2379,10 @@ select:focus-visible {
   .poker-room { min-height: 460px; }
   .poker-table { transform: scale(0.63); }
   .dealer-settings-button { display: none; }
+  .pause-table-button { min-height: 32px; padding: 0 9px; font-size: 8px; }
+  .table-paused-overlay { padding: 90px 18px 55px; }
+  .table-paused-overlay > span { width: 55px; height: 55px; font-size: 24px; }
+  .table-paused-overlay b { font-size: 20px; }
   .table-dealer { top: 20px; }
   .table-dealer img { width: 58px; height: 72px; }
   .table-dealer > button > span { bottom: -14px; min-width: 80px; }

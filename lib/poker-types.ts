@@ -162,6 +162,9 @@ export type PokerGameState = {
   chats: ChatMessage[];
   actionDeadline: number | null;
   nextHandAt: number | null;
+  paused: boolean;
+  pausedAt: number | null;
+  pausedByName: string | null;
   lastPot: number;
   resultText: string;
   dealer?: DealerProfile;
@@ -212,6 +215,9 @@ export type PublicGameView = {
   validActions: ValidActions;
   actionDeadline: number | null;
   nextHandAt: number | null;
+  paused: boolean;
+  pausedAt: number | null;
+  pausedByName: string | null;
   resultText: string;
   dealer: DealerProfile;
   actionFeed: TableActionEvent[];

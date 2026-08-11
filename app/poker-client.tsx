@@ -376,6 +376,24 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     finally { setPending(false); }
   }
 
+  async function toggleTablePause() {
+    if (!game || pending || game.room.ownerId !== user.id) return;
+    setPending(true);
+    setError("");
+    try {
+      const data = await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type: "table_pause", paused: !game.paused }),
+      });
+      if (data.game) setGame(data.game);
+      notify(game.paused ? "牌局已恢复，倒计时继续" : "牌局已暂停，发牌与计时已冻结");
+    } catch (pauseError) {
+      setError(pauseError instanceof Error ? pauseError.message : "无法修改暂停状态");
+    } finally {
+      setPending(false);
+    }
+  }
+
   function togglePartyTrigger(triggerId: PartyTriggerId) {
     setPartyTriggerDraft((current) => current.includes(triggerId)
       ? current.filter((item) => item !== triggerId)
@@ -573,8 +591,9 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
 
   const viewer = game?.players.find((player) => player.id === game.viewerId);
   const turnPlayer = game?.players.find((player) => player.seat === game.turnSeat);
-  const secondsLeft = game?.actionDeadline ? Math.max(0, Math.ceil((game.actionDeadline - now) / 1000)) : 0;
-  const nextHandSeconds = game?.nextHandAt ? Math.max(0, Math.ceil((game.nextHandAt - now) / 1000)) : 0;
+  const timerNow = game?.paused && game.pausedAt ? game.pausedAt : now;
+  const secondsLeft = game?.actionDeadline ? Math.max(0, Math.ceil((game.actionDeadline - timerNow) / 1000)) : 0;
+  const nextHandSeconds = game?.nextHandAt ? Math.max(0, Math.ceil((game.nextHandAt - timerNow) / 1000)) : 0;
   const timerProgress = `${Math.min(100, (secondsLeft / 25) * 100)}%`;
 
   const positionedPlayers = useMemo(() => {
@@ -718,7 +737,8 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
         </nav>
           <div className="topbar-actions">
             <span className={`table-mode-badge ${game.room.mode}`}>{game.room.mode === "party" ? "🎡 娱乐德州" : "♠ 常规德州"}</span>
-            <span className="server-badge"><i /> 服务器已同步</span>
+            <span className={`server-badge ${game.paused ? "paused" : ""}`}><i /> {game.paused ? "牌桌已暂停" : "服务器已同步"}</span>
+            {game.room.ownerId === user.id && <button className={`pause-table-button ${game.paused ? "resume" : ""}`} type="button" onClick={toggleTablePause} disabled={pending}>{game.paused ? "▶ 恢复牌局" : "Ⅱ 暂停牌局"}</button>}
             {game.room.mode === "party" && game.room.ownerId === user.id && <button className="party-settings-button" type="button" onClick={openPartySettings}>娱乐规则</button>}
             {game.room.ownerId === user.id && <button className="dealer-settings-button" type="button" onClick={openDealerSettings}>♣ 荷官</button>}
             <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
@@ -740,14 +760,15 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
 
       <div className="game-layout">
         <section className="table-panel" aria-label="实时德州扑克牌桌">
-          <div className="turn-banner">
-            <div><span className="turn-label">{game.phase === "showdown" ? game.resultText : game.validActions.isYourTurn ? "轮到你了" : turnPlayer ? `${turnPlayer.name} 行动中` : "等待牌局开始"}</span><span className="turn-hint">{game.validActions.isYourTurn ? game.validActions.callAmount ? `需跟注 ${formatAmount(game.validActions.callAmount, game.room.bigBlind, amountUnit)}` : "可以过牌或加注" : "状态会自动同步"}</span></div>
-            <span className="timer">{game.phase === "showdown" ? `下一手 ${nextHandSeconds}s` : secondsLeft ? `00:${String(secondsLeft).padStart(2, "0")}` : "LIVE"}</span>
+          <div className={`turn-banner ${game.paused ? "is-paused" : ""}`}>
+            <div><span className="turn-label">{game.paused ? "牌桌已暂停" : game.phase === "showdown" ? game.resultText : game.validActions.isYourTurn ? "轮到你了" : turnPlayer ? `${turnPlayer.name} 行动中` : "等待牌局开始"}</span><span className="turn-hint">{game.paused ? `${game.pausedByName ?? "房主"} 暂停了发牌和倒计时` : game.validActions.isYourTurn ? game.validActions.callAmount ? `需跟注 ${formatAmount(game.validActions.callAmount, game.room.bigBlind, amountUnit)}` : "可以过牌或加注" : "状态会自动同步"}</span></div>
+            <span className="timer">{game.paused ? "PAUSED" : game.phase === "showdown" ? `下一手 ${nextHandSeconds}s` : secondsLeft ? `00:${String(secondsLeft).padStart(2, "0")}` : "LIVE"}</span>
             <div className="timer-track"><span style={{ width: game.phase === "showdown" ? `${(nextHandSeconds / (game.room.mode === "party" ? 15 : 8)) * 100}%` : timerProgress }} /></div>
           </div>
 
           <div className="poker-room">
             <PartyEffectOverlay event={partyTableEvent} />
+            {game.paused && <div className="table-paused-overlay" role="status"><span>Ⅱ</span><b>牌桌暂停中</b><p>自动发牌、机器人操作和所有行动倒计时均已冻结。</p><small>{game.room.ownerId === user.id ? "点击顶部“恢复牌局”继续" : "等待房主恢复牌局"}</small></div>}
             <div className="ambient-copy ambient-left">SERVER SHUFFLED</div><div className="ambient-copy ambient-right">LIVE TABLE</div>
             <div className={`table-dealer ${dealBurst ? "is-dealing" : ""}`}>
               <button type="button" onClick={openDealerSettings} disabled={game.room.ownerId !== user.id} aria-label={game.room.ownerId === user.id ? "更换荷官" : `荷官 ${game.dealer.name}`}>
@@ -784,7 +805,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <div className="action-dock">
             <div className="hand-summary"><span>当前状态</span><b>{game.phase === "showdown" ? "本手结束" : game.validActions.isYourTurn ? "请行动" : "等待中"}</b><small>{pending ? "服务器确认操作中…" : phaseName[game.phase]}</small></div>
             {game.phase === "showdown" ? (
-              <button className="primary-action next-hand" type="button" disabled={game.room.ownerId !== user.id || pending} onClick={startNextHand}>{game.room.ownerId === user.id ? "立即开始下一手" : `下一手将在 ${nextHandSeconds} 秒后开始`}</button>
+              <button className="primary-action next-hand" type="button" disabled={game.room.ownerId !== user.id || pending || game.paused} onClick={startNextHand}>{game.paused ? "牌桌暂停中" : game.room.ownerId === user.id ? "立即开始下一手" : `下一手将在 ${nextHandSeconds} 秒后开始`}</button>
             ) : (
               <div className="action-buttons">
                 <button className="action-button fold-action" type="button" disabled={!game.validActions.canFold || pending} onClick={() => sendAction("fold")}><span>弃牌</span><kbd>F</kbd></button>
