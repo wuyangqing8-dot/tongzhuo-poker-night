@@ -2,6 +2,13 @@ import type {
   CardCode,
   GamePhase,
   GamePlayer,
+  PartyEffectEventKind,
+  PartyEffectId,
+  PartyEffectPresentation,
+  PartyGameState,
+  PartyPlayerState,
+  PartyRuntimeEffect,
+  PartyTriggerId,
   PlayerAction,
   PokerGameState,
   PublicGameView,
@@ -9,6 +16,7 @@ import type {
   Suit,
 } from "./poker-types";
 import { DEALER_PRESETS, DEFAULT_DEALER } from "./dealer-options";
+import { DEFAULT_PARTY_TRIGGERS, ONLINE_PARTY_EFFECTS, ONLINE_PARTY_TRIGGERS, partyEffect, partyTrigger } from "./online-party";
 
 const ranks: Rank[] = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const suits: Suit[] = ["S", "H", "D", "C"];
@@ -107,7 +115,241 @@ function handReadyPlayers(state: PokerGameState) {
   return state.players.filter((player) => player.chips > 0);
 }
 
+function ensurePartyPlayer(state: PokerGameState, playerId: string): PartyPlayerState {
+  const party = ensurePartyState(state);
+  party.playerStates[playerId] ??= { playerId, credits: 0, achievementCount: 0, effects: [] };
+  return party.playerStates[playerId];
+}
+
+function ensurePartyState(state: PokerGameState): PartyGameState {
+  state.party ??= {
+    enabledTriggers: [...DEFAULT_PARTY_TRIGGERS],
+    maxStoredCredits: 3,
+    playerStates: {},
+    reveals: [],
+    turnLeaderIds: [],
+    lastAwards: [],
+    effectEvents: [],
+  };
+  state.party.effectEvents ??= [];
+  state.players.forEach((player) => {
+    state.party!.playerStates[player.id] ??= { playerId: player.id, credits: 0, achievementCount: 0, effects: [] };
+  });
+  return state.party;
+}
+
+function partyEffectsFor(
+  state: PokerGameState,
+  effectId: PartyEffectId,
+  playerId?: string,
+) {
+  if (state.roomMode !== "party") return [] as Array<{ owner: GamePlayer; effect: PartyRuntimeEffect }>;
+  const party = ensurePartyState(state);
+  return state.players.flatMap((owner) => {
+    if (playerId && owner.id !== playerId) return [];
+    const runtime = party.playerStates[owner.id];
+    return (runtime?.effects ?? [])
+      .filter((effect) => effect.effectId === effectId && effect.status === "active" && effect.appliesHand === state.handNumber)
+      .map((effect) => ({ owner, effect }));
+  });
+}
+
+function effectPresentation(effectId: PartyEffectId): PartyEffectPresentation {
+  if (["sky_eye", "public_card", "get_peeked", "open_card", "river_judgement"].includes(effectId)) return "reveal";
+  if (["redraw_one", "redraw_hand"].includes(effectId)) return "hole_redraw";
+  if (["turn_redraw", "river_redraw", "random_turn"].includes(effectId)) return "board_redraw";
+  if (effectId === "pass_left") return "pass_left";
+  if (effectId === "seat_swap" || effectId === "emperor_button") return "seat_swap";
+  if (effectId === "peek_shield") return "shield";
+  return "rule";
+}
+
+function addPartyEffectEvent(
+  state: PokerGameState,
+  owner: GamePlayer,
+  effectId: PartyEffectId,
+  kind: PartyEffectEventKind,
+  title: string,
+  detail: string,
+  options?: { visibility?: "all" | string; presentation?: PartyEffectPresentation; cards?: CardCode[] },
+) {
+  const definition = partyEffect(effectId);
+  const party = ensurePartyState(state);
+  party.effectEvents.push({
+    id: id("party_event"),
+    playerId: owner.id,
+    playerName: owner.name,
+    effectId,
+    effectName: definition?.name ?? effectId,
+    emoji: definition?.emoji ?? "✦",
+    kind,
+    title,
+    detail,
+    handNumber: state.handNumber,
+    at: Date.now(),
+    visibility: options?.visibility ?? "all",
+    presentation: options?.presentation ?? effectPresentation(effectId),
+    cards: options?.cards,
+  });
+  party.effectEvents = party.effectEvents.slice(-30);
+}
+
+function consumePartyEffect(
+  state: PokerGameState,
+  owner: GamePlayer,
+  effect: PartyRuntimeEffect,
+  detail: string,
+  options?: { visibility?: "all" | string; presentation?: PartyEffectPresentation; cards?: CardCode[]; title?: string },
+) {
+  if (effect.status === "used") return;
+  effect.status = "used";
+  effect.detail = detail;
+  const name = partyEffect(effect.effectId)?.name ?? effect.effectId;
+  addPartyEffectEvent(state, owner, effect.effectId, "executed", options?.title ?? `「${name}」已执行`, detail, options);
+}
+
+function expirePartyEffect(state: PokerGameState, owner: GamePlayer, effect: PartyRuntimeEffect, detail: string) {
+  if (effect.status === "used" || effect.status === "expired") return;
+  effect.status = "expired";
+  effect.detail = detail;
+  const name = partyEffect(effect.effectId)?.name ?? effect.effectId;
+  addPartyEffectEvent(state, owner, effect.effectId, "expired", `「${name}」已过期`, detail, { presentation: "rule" });
+}
+
+function randomOther(players: GamePlayer[], playerId: string) {
+  const others = players.filter((player) => player.id !== playerId && player.hole.length === 2 && !player.folded);
+  return others.length ? others[randomInt(others.length)] : null;
+}
+
+function tryPartyReveal(state: PokerGameState, owner: GamePlayer, viewerId: string | "all", target: GamePlayer, source: PartyRuntimeEffect) {
+  const shield = partyEffectsFor(state, "peek_shield", target.id)[0];
+  if (shield) {
+    consumePartyEffect(state, target, shield.effect, `抵消了「${partyEffect(source.effectId)?.name ?? "看牌"}」`, { presentation: "shield" });
+    consumePartyEffect(state, owner, source, `被 ${target.name} 的防窥盾抵消`, { presentation: "shield" });
+    addLog(state, `${target.name} 的防窥盾抵消了一次看牌效果`, "system");
+    return;
+  }
+  const cardIndex = randomInt(2);
+  ensurePartyState(state).reveals.push({ viewerId, playerId: target.id, cardIndex, handNumber: state.handNumber });
+  if (viewerId !== "all") addPartyEffectEvent(state, owner, source.effectId, "executed", `${owner.name} 使用了「${partyEffect(source.effectId)?.name ?? "看牌"}」`, "服务器已私下向技能持有者展示一张对手底牌。", { presentation: "reveal" });
+  consumePartyEffect(state, owner, source, viewerId === "all" ? `${target.name} 的一张底牌已向全桌公开` : `已私下查看 ${target.name} 的一张底牌`, { visibility: viewerId === "all" ? "all" : owner.id, presentation: "reveal" });
+  addLog(state, viewerId === "all" ? `${target.name} 的一张底牌因娱乐效果公开` : `服务器已执行一次私密看牌效果`, "system");
+}
+
+function preparePartyHand(state: PokerGameState, ready: GamePlayer[]) {
+  if (state.roomMode !== "party") return null;
+  const party = ensurePartyState(state);
+  party.reveals = [];
+  party.turnLeaderIds = [];
+  party.lastAwards = [];
+  state.players.forEach((owner) => party.playerStates[owner.id]?.effects.forEach((effect) => {
+    const definition = partyEffect(effect.effectId);
+    const persistsUntilUsed = effect.effectId === "free_big_blind";
+    if ((effect.status === "pending" || effect.status === "active") && effect.appliesHand < state.handNumber) {
+      if (persistsUntilUsed) {
+        effect.status = "active";
+        effect.appliesHand = state.handNumber;
+      } else {
+        expirePartyEffect(state, owner, effect, "限定手牌已经结束，未使用的效果自动失效");
+      }
+    }
+    if (effect.status === "pending" && effect.appliesHand === state.handNumber) {
+      if (definition?.control === "automatic") {
+        effect.status = "active";
+        addPartyEffectEvent(state, owner, effect.effectId, "armed", `${owner.name} 的「${definition.name}」自动生效`, definition.useWindowLabel, { presentation: effectPresentation(effect.effectId) });
+      } else if (definition?.useWindow === "before_hand") {
+        if (owner.isBot) {
+          effect.status = "active";
+          addPartyEffectEvent(state, owner, effect.effectId, "armed", `${owner.name} 激活「${definition.name}」`, "机器人已在开局前自动使用，服务器将在本手执行。", { presentation: effectPresentation(effect.effectId) });
+        } else {
+          expirePartyEffect(state, owner, effect, "没有在本手开始前点击使用");
+        }
+      }
+    }
+  }));
+
+  for (const { owner, effect } of partyEffectsFor(state, "seat_swap")) {
+    if (!ready.includes(owner)) continue;
+    const candidates = ready.filter((player) => player.id !== owner.id);
+    const target = candidates.length ? candidates[randomInt(candidates.length)] : null;
+    if (target) {
+      [owner.seat, target.seat] = [target.seat, owner.seat];
+      consumePartyEffect(state, owner, effect, `与 ${target.name} 交换座位，双方筹码保持不变`, { presentation: "seat_swap" });
+      addLog(state, `娱乐效果：${owner.name} 与 ${target.name} 交换座位`, "system");
+    }
+  }
+
+  const emperor = partyEffectsFor(state, "emperor_button")[0];
+  if (emperor && ready.includes(emperor.owner)) {
+    consumePartyEffect(state, emperor.owner, emperor.effect, "本手 Button 已移交给技能持有者", { presentation: "seat_swap" });
+    addLog(state, `娱乐效果：${emperor.owner.name} 获得皇帝 Button`, "system");
+    return emperor.owner;
+  }
+  return null;
+}
+
+function applyPartyHoleEffects(state: PokerGameState, ready: GamePlayer[]) {
+  if (state.roomMode !== "party") return;
+
+  for (const { owner, effect } of partyEffectsFor(state, "redraw_hand")) {
+    if (owner.hole.length === 2) {
+      owner.hole = [draw(state), draw(state)];
+      consumePartyEffect(state, owner, effect, "两张底牌已由服务器重发", { presentation: "hole_redraw" });
+      addLog(state, `娱乐效果：${owner.name} 整手重抽`, "system");
+    }
+  }
+  for (const { owner, effect } of partyEffectsFor(state, "redraw_one")) {
+    if (owner.hole.length === 2) {
+      const index = randomInt(2);
+      owner.hole[index] = draw(state);
+      consumePartyEffect(state, owner, effect, `第 ${index + 1} 张底牌已由服务器重发`, { presentation: "hole_redraw" });
+      addLog(state, `娱乐效果：${owner.name} 换了一张底牌`, "system");
+    }
+  }
+
+  const passLeft = partyEffectsFor(state, "pass_left").find(({ owner }) => ready.includes(owner));
+  if (passLeft) {
+    const ordered = [...ready].filter((player) => player.hole.length === 2).sort((a, b) => a.seat - b.seat);
+    if (ordered.length > 1) {
+      const passing = ordered.map((player) => {
+        const index = randomInt(2);
+        return { index, card: player.hole[index] };
+      });
+      const nextHoles = ordered.map((player) => [...player.hole]);
+      passing.forEach((item, senderIndex) => {
+        const receiverIndex = (senderIndex + 1) % ordered.length;
+        nextHoles[receiverIndex][passing[receiverIndex].index] = item.card;
+      });
+      ordered.forEach((player, index) => { player.hole = nextHoles[index] as CardCode[]; });
+      consumePartyEffect(state, passLeft.owner, passLeft.effect, `所有 ${ordered.length} 名玩家已随机向左传递一张底牌`, { presentation: "pass_left" });
+      addLog(state, "娱乐效果：乾坤大挪移已由服务器完成", "system");
+    }
+  }
+
+  for (const { owner, effect } of partyEffectsFor(state, "open_card")) {
+    if (owner.hole.length !== 2) continue;
+    ensurePartyState(state).reveals.push({ viewerId: "all", playerId: owner.id, cardIndex: randomInt(2), handNumber: state.handNumber });
+    consumePartyEffect(state, owner, effect, "一张底牌已向全桌公开", { presentation: "reveal" });
+  }
+  for (const { owner, effect } of partyEffectsFor(state, "sky_eye")) {
+    if (owner.hole.length !== 2) continue;
+    const target = randomOther(ready, owner.id);
+    if (target) tryPartyReveal(state, owner, owner.id, target, effect);
+  }
+  for (const { owner, effect } of partyEffectsFor(state, "public_card")) {
+    if (owner.hole.length !== 2) continue;
+    const target = randomOther(ready, owner.id);
+    if (target) tryPartyReveal(state, owner, "all", target, effect);
+  }
+  for (const { owner, effect } of partyEffectsFor(state, "get_peeked")) {
+    if (owner.hole.length !== 2) continue;
+    const viewer = randomOther(ready, owner.id);
+    if (viewer) tryPartyReveal(state, owner, viewer.id, owner, effect);
+  }
+}
+
 export function startHand(state: PokerGameState) {
+  state.roomMode ??= "classic";
   state.players = state.players.filter((player) => !player.isKicked);
   state.players.forEach((player) => {
     player.totalBuyIn ??= state.startingChips;
@@ -136,10 +378,11 @@ export function startHand(state: PokerGameState) {
   }
 
   state.handNumber += 1;
+  const forcedDealer = preparePartyHand(state, ready);
   const previousDealer = state.dealerSeat;
-  const dealer = state.handNumber === 1
+  const dealer = forcedDealer ?? (state.handNumber === 1
     ? [...ready].sort((a, b) => a.seat - b.seat)[0]
-    : nextPlayer(state, previousDealer, (player) => player.chips > 0) ?? ready[0];
+    : nextPlayer(state, previousDealer, (player) => player.chips > 0) ?? ready[0]);
   state.dealerSeat = dealer.seat;
   state.deck = shuffledDeck();
   state.board = [];
@@ -171,6 +414,7 @@ export function startHand(state: PokerGameState) {
   for (let round = 0; round < 2; round += 1) {
     dealOrder.forEach((player) => player.hole.push(draw(state)));
   }
+  applyPartyHoleEffects(state, ready);
 
   const headsUp = ready.length === 2;
   const smallBlindPlayer = headsUp
@@ -178,9 +422,27 @@ export function startHand(state: PokerGameState) {
     : nextPlayer(state, dealer.seat, (player) => player.hole.length === 2)!;
   const bigBlindPlayer = nextPlayer(state, smallBlindPlayer.seat, (player) => player.hole.length === 2)!;
   postBlind(state, smallBlindPlayer, state.smallBlind, "小盲");
-  postBlind(state, bigBlindPlayer, state.bigBlind, "大盲");
+  const freeBigBlind = partyEffectsFor(state, "free_big_blind", bigBlindPlayer.id)[0];
+  if (freeBigBlind) {
+    bigBlindPlayer.lastAction = "免大盲";
+    consumePartyEffect(state, bigBlindPlayer, freeBigBlind.effect, "服务器已免除本手大盲", { presentation: "rule" });
+    addLog(state, `娱乐效果：${bigBlindPlayer.name} 免除本手大盲`, "system");
+  } else {
+    postBlind(state, bigBlindPlayer, state.bigBlind, "大盲");
+  }
   state.currentBet = Math.max(smallBlindPlayer.streetBet, bigBlindPlayer.streetBet);
   state.phase = "preflop";
+  if (state.roomMode === "party") {
+    state.players.filter((player) => player.isBot).forEach((bot) => {
+      const effects = ensurePartyPlayer(state, bot.id).effects.filter((effect) => {
+        const definition = partyEffect(effect.effectId);
+        return effect.status === "pending" && effect.appliesHand === state.handNumber && definition?.control === "manual";
+      });
+      effects.forEach((effect) => {
+        try { activatePartyEffect(state, state.ownerId, effect.id); } catch { /* bot skips effects without a legal target */ }
+      });
+    });
+  }
   const first = nextPlayer(state, bigBlindPlayer.seat, (player) => player.hole.length === 2 && !player.allIn);
   setTurn(state, first?.seat ?? null);
   addLog(state, `第 ${state.handNumber} 手牌已由服务器洗牌并发出`, "system");
@@ -199,6 +461,13 @@ function streetComplete(state: PokerGameState) {
 function finishUncontested(state: PokerGameState, winner: GamePlayer) {
   const pot = state.players.reduce((sum, player) => sum + player.contribution, 0);
   winner.chips += pot;
+  if (state.roomMode === "party") {
+    if (winner.allIn) awardPartyCredit(state, winner, "all_in_win");
+    if (state.players.some((player) => player.id !== winner.id && player.hole.length === 2 && player.chips === 0)) {
+      awardPartyCredit(state, winner, "knockout");
+    }
+    if (winner.isBot && ensurePartyPlayer(state, winner.id).credits > 0) spinPartyWheel(state, state.ownerId, winner.id);
+  }
   state.lastPot = pot;
   state.resultText = `${winner.name} 赢得 ${pot.toLocaleString()} 筹码`;
   addLog(state, state.resultText, "result");
@@ -208,7 +477,65 @@ function finishUncontested(state: PokerGameState, winner: GamePlayer) {
   });
   state.phase = "showdown";
   setTurn(state, null);
-  state.nextHandAt = Date.now() + 8_000;
+  state.nextHandAt = Date.now() + (state.roomMode === "party" ? 15_000 : 8_000);
+}
+
+function drawPartyStreetCard(state: PokerGameState, street: "turn" | "river") {
+  if (state.roomMode !== "party") return draw(state);
+  if (street === "turn") {
+    const redraw = partyEffectsFor(state, "turn_redraw").find(({ owner }) => !owner.folded);
+    const randomTurn = partyEffectsFor(state, "random_turn").find(({ owner }) => !owner.folded);
+    if (redraw) {
+      const voided = draw(state);
+      const accepted = draw(state);
+      consumePartyEffect(state, redraw.owner, redraw.effect, `第一张 Turn ${voided} 作废，第二张 ${accepted} 生效并必须接受`, { presentation: "board_redraw", cards: [voided, accepted] });
+      addLog(state, `娱乐效果：Turn ${voided} 作废，重发 ${accepted} 并必须接受`, "system");
+      return accepted;
+    }
+    if (randomTurn) {
+      const first = draw(state);
+      const second = draw(state);
+      const accepted = randomInt(2) === 0 ? first : second;
+      consumePartyEffect(state, randomTurn.owner, randomTurn.effect, `Turn 候选 ${first}/${second}，服务器随机选择 ${accepted} 生效`, { presentation: "board_redraw", cards: [first, second, accepted] });
+      addLog(state, `娱乐效果：随机 Turn 候选 ${first}/${second}，${accepted} 生效`, "system");
+      return accepted;
+    }
+  }
+  if (street === "river") {
+    const redraw = partyEffectsFor(state, "river_redraw").find(({ owner }) => !owner.folded);
+    if (redraw) {
+      const voided = draw(state);
+      const accepted = draw(state);
+      consumePartyEffect(state, redraw.owner, redraw.effect, `第一张 River ${voided} 作废，第二张 ${accepted} 生效并必须接受`, { presentation: "board_redraw", cards: [voided, accepted] });
+      addLog(state, `娱乐效果：River ${voided} 作废，重发 ${accepted} 并必须接受`, "system");
+      return accepted;
+    }
+  }
+  return draw(state);
+}
+
+function rememberTurnLeaders(state: PokerGameState) {
+  if (state.roomMode !== "party" || state.board.length !== 4) return;
+  const contenders = playersInHand(state);
+  if (!contenders.length) return;
+  const scores = new Map(contenders.map((player) => [player.id, bestScore([...player.hole, ...state.board])]));
+  let best = scores.get(contenders[0].id)!;
+  contenders.forEach((player) => {
+    const score = scores.get(player.id)!;
+    if (compareScore(score, best) > 0) best = score;
+  });
+  ensurePartyState(state).turnLeaderIds = contenders
+    .filter((player) => compareScore(scores.get(player.id)!, best) === 0)
+    .map((player) => player.id);
+}
+
+function applyRiverJudgement(state: PokerGameState) {
+  for (const { owner, effect } of partyEffectsFor(state, "river_judgement")) {
+    if (owner.folded) continue;
+    ensurePartyState(state).reveals.push({ viewerId: "all", playerId: owner.id, cardIndex: randomInt(2), handNumber: state.handNumber });
+    consumePartyEffect(state, owner, effect, "River 发出后，一张底牌已向全桌公开", { presentation: "reveal" });
+    addLog(state, `娱乐效果：河牌审判公开了 ${owner.name} 的一张底牌`, "system");
+  }
 }
 
 function advanceStreet(state: PokerGameState) {
@@ -226,10 +553,12 @@ function advanceStreet(state: PokerGameState) {
     state.board.push(draw(state), draw(state), draw(state));
   } else if (state.phase === "flop") {
     state.phase = "turn";
-    state.board.push(draw(state));
+    state.board.push(drawPartyStreetCard(state, "turn"));
+    rememberTurnLeaders(state);
   } else if (state.phase === "turn") {
     state.phase = "river";
-    state.board.push(draw(state));
+    state.board.push(drawPartyStreetCard(state, "river"));
+    applyRiverJudgement(state);
   }
   addLog(state, `${phaseLabel[state.phase]}开始`, "system");
 
@@ -296,12 +625,18 @@ function applyActionInternal(
     actionAmount = paid;
     addLog(state, `${actor.name} ${actor.allIn ? "全下" : "跟注"} ${paid}`);
   } else {
+    const noRaise = state.phase === "preflop" && partyEffectsFor(state, "no_raise", actor.id)[0];
+    if (noRaise) throw new Error("娱乐效果「禁止加注」生效中：Preflop 只能弃牌、过牌或跟注");
     const maxTarget = actor.streetBet + actor.chips;
     const target = Math.floor(requestedAmount ?? 0);
     if (target <= state.currentBet) throw new Error("加注金额必须高于当前下注");
     if (target > maxTarget) throw new Error("筹码不足");
     const raiseSize = target - state.currentBet;
     const isAllIn = target === maxTarget;
+    const miniRaise = state.phase === "preflop" && partyEffectsFor(state, "mini_raise", actor.id)[0];
+    if (miniRaise && target !== Math.min(maxTarget, state.currentBet + state.minRaise)) {
+      throw new Error(`娱乐效果「Mini Raise」生效中：第一次只能加注到 ${Math.min(maxTarget, state.currentBet + state.minRaise)}`);
+    }
     if (raiseSize < state.minRaise && !isAllIn) {
       throw new Error(`最小加注到 ${state.currentBet + state.minRaise}`);
     }
@@ -320,6 +655,7 @@ function applyActionInternal(
     actionLabel = actor.allIn ? "全下" : "加注到";
     actionAmount = target;
     addLog(state, `${actor.name} ${actor.allIn ? "全下" : "加注到"} ${target}`);
+    if (miniRaise) consumePartyEffect(state, actor, miniRaise.effect, `已执行最小加注到 ${target}`, { presentation: "rule" });
   }
 
   const actionAt = Date.now();
@@ -356,16 +692,20 @@ export function applyPlayerAction(
 function botDecision(state: PokerGameState, bot: GamePlayer): { action: PlayerAction; amount?: number } {
   const callAmount = Math.max(0, state.currentBet - bot.streetBet);
   const roll = randomInt(100);
+  const noRaise = state.phase === "preflop" && partyEffectsFor(state, "no_raise", bot.id).length > 0;
+  const miniRaise = state.phase === "preflop" && partyEffectsFor(state, "mini_raise", bot.id).length > 0;
   if (callAmount === 0) {
-    if (roll < 17 && bot.chips >= state.bigBlind * 2) {
+    if (!noRaise && roll < 17 && bot.chips >= state.bigBlind * 2) {
       return { action: "raise", amount: Math.min(bot.streetBet + bot.chips, state.currentBet + state.minRaise) };
     }
     return { action: "check" };
   }
   if (callAmount >= bot.chips) return roll < 62 ? { action: "call" } : { action: "fold" };
   if (callAmount > bot.chips * 0.42 && roll < 68) return { action: "fold" };
-  if (roll < 12 && bot.chips > callAmount + state.minRaise) {
-    const target = Math.min(bot.streetBet + bot.chips, state.currentBet + state.minRaise + randomInt(4) * state.bigBlind);
+  if (!noRaise && roll < 12 && bot.chips > callAmount + state.minRaise) {
+    const target = miniRaise
+      ? Math.min(bot.streetBet + bot.chips, state.currentBet + state.minRaise)
+      : Math.min(bot.streetBet + bot.chips, state.currentBet + state.minRaise + randomInt(4) * state.bigBlind);
     return { action: "raise", amount: target };
   }
   return roll < 84 ? { action: "call" } : { action: "fold" };
@@ -387,7 +727,13 @@ function runBoardToShowdown(state: PokerGameState) {
   while (state.board.length < 5) {
     burn(state);
     if (state.board.length === 0) state.board.push(draw(state), draw(state), draw(state));
-    else state.board.push(draw(state));
+    else if (state.board.length === 3) {
+      state.board.push(drawPartyStreetCard(state, "turn"));
+      rememberTurnLeaders(state);
+    } else {
+      state.board.push(drawPartyStreetCard(state, "river"));
+      applyRiverJudgement(state);
+    }
   }
   finishShowdown(state);
 }
@@ -445,6 +791,213 @@ function bestScore(cards: CardCode[]) {
 
 const scoreNames = ["高牌", "一对", "两对", "三条", "顺子", "同花", "葫芦", "四条", "同花顺"];
 
+function awardPartyCredit(state: PokerGameState, player: GamePlayer, triggerId: PartyTriggerId) {
+  if (state.roomMode !== "party") return;
+  const party = ensurePartyState(state);
+  if (!party.enabledTriggers.includes(triggerId)) return;
+  if (party.lastAwards.some((award) => award.playerId === player.id && award.triggerId === triggerId)) return;
+  const runtime = ensurePartyPlayer(state, player.id);
+  if (runtime.credits >= party.maxStoredCredits) {
+    addLog(state, `${player.name} 触发「${partyTrigger(triggerId)?.name ?? triggerId}」，但转盘次数已达上限`, "system");
+    return;
+  }
+  runtime.credits += 1;
+  runtime.achievementCount += 1;
+  const triggerName = partyTrigger(triggerId)?.name ?? triggerId;
+  party.lastAwards.push({ id: id("award"), playerId: player.id, playerName: player.name, triggerId, triggerName, handNumber: state.handNumber, at: Date.now() });
+  addLog(state, `娱乐成就：${player.name} 触发「${triggerName}」，获得 1 次转盘`, "result");
+}
+
+function processShowdownParty(
+  state: PokerGameState,
+  contenders: GamePlayer[],
+  scored: Map<string, Score>,
+  awards: Map<string, number>,
+) {
+  if (state.roomMode !== "party") return;
+  const winners = contenders.filter((player) => (awards.get(player.id) ?? 0) > 0);
+  winners.forEach((winner) => {
+    const score = scored.get(winner.id)!;
+    if (score[0] === 8) awardPartyCredit(state, winner, "straight_flush");
+    if (score[0] === 7) awardPartyCredit(state, winner, "quads");
+    if (score[0] === 6) awardPartyCredit(state, winner, "full_house");
+    if (score[0] === 0) awardPartyCredit(state, winner, "high_card");
+    const holeRanks = winner.hole.map((card) => card[0]).sort().join("");
+    if (holeRanks === "27" && winner.hole[0][1] !== winner.hole[1][1]) awardPartyCredit(state, winner, "seven_two");
+    if (winner.allIn) awardPartyCredit(state, winner, "all_in_win");
+    if (ensurePartyState(state).turnLeaderIds.length && !ensurePartyState(state).turnLeaderIds.includes(winner.id)) {
+      awardPartyCredit(state, winner, "river_comeback");
+    }
+    const knockedOut = state.players.some((player) => player.id !== winner.id && player.hole.length === 2 && player.chips === 0);
+    if (knockedOut) awardPartyCredit(state, winner, "knockout");
+  });
+  contenders
+    .filter((player) => !winners.includes(player) && (scored.get(player.id)?.[0] ?? 0) >= 6)
+    .forEach((player) => awardPartyCredit(state, player, "bad_beat"));
+
+  state.players.filter((player) => player.isBot).forEach((bot) => {
+    const runtime = ensurePartyPlayer(state, bot.id);
+    let guard = 0;
+    while (runtime.credits > 0 && guard < 8) {
+      spinPartyWheel(state, state.ownerId, bot.id);
+      guard += 1;
+    }
+  });
+}
+
+function secureRandomFloat() {
+  return randomInt(0x1_0000_0000) / 0x1_0000_0000;
+}
+
+export function configurePartyRules(state: PokerGameState, actorId: string, triggerIds: PartyTriggerId[]) {
+  if (state.ownerId !== actorId) throw new Error("只有房主可以修改娱乐触发条件");
+  if ((state.roomMode ?? "classic") !== "party") throw new Error("当前不是娱乐德州房间");
+  const valid = [...new Set(triggerIds)].filter((triggerId) => ONLINE_PARTY_TRIGGERS.some((item) => item.id === triggerId));
+  if (!valid.length) throw new Error("至少启用一个娱乐触发条件");
+  ensurePartyState(state).enabledTriggers = valid;
+  state.updatedAt = Date.now();
+  addLog(state, `房主已更新娱乐触发条件，共 ${valid.length} 项`, "system");
+  return valid;
+}
+
+function partyUseWindowOpen(state: PokerGameState, effect: PartyRuntimeEffect) {
+  const definition = partyEffect(effect.effectId);
+  if (!definition?.useWindow) return false;
+  if (definition.useWindow === "before_hand") {
+    return (state.phase === "waiting" || state.phase === "showdown") && effect.appliesHand === state.handNumber + 1;
+  }
+  if (effect.appliesHand !== state.handNumber) return false;
+  if (definition.useWindow === "preflop") return state.phase === "preflop";
+  if (definition.useWindow === "before_turn") return state.phase === "preflop" || state.phase === "flop";
+  return state.phase === "preflop" || state.phase === "flop" || state.phase === "turn";
+}
+
+export function activatePartyEffect(state: PokerGameState, actorId: string, effectInstanceId: string) {
+  if ((state.roomMode ?? "classic") !== "party") throw new Error("当前不是娱乐德州房间");
+  const party = ensurePartyState(state);
+  const owner = state.players.find((player) => party.playerStates[player.id]?.effects.some((effect) => effect.id === effectInstanceId));
+  const effect = owner ? party.playerStates[owner.id]?.effects.find((item) => item.id === effectInstanceId) : undefined;
+  if (!owner || !effect) throw new Error("没有找到这个娱乐效果");
+  if (actorId !== owner.id && !(owner.isBot && actorId === state.ownerId)) throw new Error("只能使用自己的娱乐效果");
+  if (effect.status !== "pending") throw new Error(effect.status === "active" ? "这个效果已经激活" : "这个效果已经处理过了");
+  const definition = partyEffect(effect.effectId);
+  if (!definition || definition.control !== "manual") throw new Error("这个效果由服务器自动执行");
+  if (!partyUseWindowOpen(state, effect)) throw new Error(`使用时机不正确：${definition.useWindowLabel}`);
+  if (owner.hole.length === 2 && owner.folded && definition.useWindow !== "before_hand") throw new Error("你已经弃牌，无法在本手使用这个效果");
+
+  if (definition.boardChanging) {
+    const conflict = Object.values(party.playerStates).flatMap((runtime) => runtime.effects).some((other) => {
+      if (other.id === effect.id || other.appliesHand !== effect.appliesHand || other.status !== "active") return false;
+      return partyEffect(other.effectId)?.boardChanging;
+    });
+    if (conflict) throw new Error("本手已有一个改变公共牌的效果，不能重复激活");
+  }
+
+  effect.status = "active";
+  effect.detail = `已激活，${definition.useWindowLabel}`;
+
+  if (effect.effectId === "sky_eye" || effect.effectId === "public_card") {
+    const target = randomOther(playersInHand(state), owner.id);
+    if (!target) {
+      effect.status = "pending";
+      throw new Error("当前没有可以选择的对手");
+    }
+    tryPartyReveal(state, owner, effect.effectId === "public_card" ? "all" : owner.id, target, effect);
+  } else if (effect.effectId === "redraw_one") {
+    if (owner.hole.length !== 2) {
+      effect.status = "pending";
+      throw new Error("底牌尚未发出，无法换牌");
+    }
+    const index = randomInt(2);
+    owner.hole[index] = draw(state);
+    consumePartyEffect(state, owner, effect, `第 ${index + 1} 张底牌已收回，并由服务器补发一张新牌`, { presentation: "hole_redraw" });
+    addLog(state, `娱乐效果：${owner.name} 主动使用「换一张」`, "system");
+  } else if (effect.effectId === "redraw_hand") {
+    if (owner.hole.length !== 2) {
+      effect.status = "pending";
+      throw new Error("底牌尚未发出，无法重抽");
+    }
+    owner.hole = [draw(state), draw(state)];
+    consumePartyEffect(state, owner, effect, "原两张底牌已收回，服务器重新发出两张底牌", { presentation: "hole_redraw" });
+    addLog(state, `娱乐效果：${owner.name} 主动使用「整手重抽」`, "system");
+  } else {
+    addPartyEffectEvent(state, owner, effect.effectId, "armed", `${owner.name} 激活「${definition.name}」`, `效果已锁定到 Hand #${effect.appliesHand}，服务器会在正确时点自动执行。`, { presentation: effectPresentation(effect.effectId) });
+    addLog(state, `娱乐效果：${owner.name} 激活「${definition.name}」`, "system");
+  }
+
+  state.updatedAt = Date.now();
+  return effect;
+}
+
+export function spinPartyWheel(
+  state: PokerGameState,
+  actorId: string,
+  targetId = actorId,
+  random: () => number = secureRandomFloat,
+) {
+  if ((state.roomMode ?? "classic") !== "party") throw new Error("当前不是娱乐德州房间");
+  const target = state.players.find((player) => player.id === targetId && !player.isKicked);
+  if (!target) throw new Error("没有找到获得转盘资格的玩家");
+  if (actorId !== targetId && state.ownerId !== actorId) throw new Error("只能转动自己的转盘");
+  if (target.isBot && state.ownerId !== actorId) throw new Error("只有房主可以代机器人转盘");
+  const party = ensurePartyState(state);
+  const runtime = ensurePartyPlayer(state, target.id);
+  if (runtime.credits <= 0) throw new Error("该玩家没有可用转盘次数");
+
+  const nextHand = state.handNumber + 1;
+  const hasBoardEffect = Object.values(party.playerStates).some((playerState) => playerState.effects.some((effect) => {
+    const definition = partyEffect(effect.effectId);
+    return effect.appliesHand === nextHand && (effect.status === "pending" || effect.status === "active") && definition?.boardChanging;
+  }));
+  const choices = ONLINE_PARTY_EFFECTS.filter((effect) => !(hasBoardEffect && effect.boardChanging));
+  const total = choices.reduce((sum, effect) => sum + effect.weight, 0);
+  let cursor = Math.max(0, Math.min(0.999999999, random())) * total;
+  let selected = choices[choices.length - 1];
+  for (const effect of choices) {
+    cursor -= effect.weight;
+    if (cursor < 0) {
+      selected = effect;
+      break;
+    }
+  }
+
+  runtime.credits -= 1;
+  if (selected.id === "spin_again") {
+    runtime.credits = Math.min(party.maxStoredCredits, runtime.credits + 1);
+  } else if (selected.timing === "next_hand") {
+    runtime.effects.push({
+      id: id("party_effect"),
+      effectId: selected.id,
+      awardedHand: state.handNumber,
+      appliesHand: nextHand,
+      status: "pending",
+    });
+  }
+  const spin = {
+    id: id("spin"),
+    playerId: target.id,
+    playerName: target.name,
+    effectId: selected.id,
+    effectName: selected.name,
+    emoji: selected.emoji,
+    description: selected.description,
+    effectIndex: ONLINE_PARTY_EFFECTS.findIndex((effect) => effect.id === selected.id),
+    at: Date.now(),
+  };
+  party.lastSpin = spin;
+  if (selected.control === "instant") {
+    addPartyEffectEvent(state, target, selected.id, "executed", `${target.name} 抽中「${selected.name}」`, selected.description, { presentation: "reward" });
+  } else {
+    const detail = selected.control === "manual"
+      ? `已存入技能栏；${selected.useWindowLabel}，错过后自动过期。`
+      : `服务器将在${selected.useWindowLabel}，无需玩家点击。`;
+    addPartyEffectEvent(state, target, selected.id, "awarded", `${target.name} 获得「${selected.name}」`, detail, { presentation: "reward" });
+  }
+  state.updatedAt = Date.now();
+  addLog(state, `${target.name} 转动娱乐转盘，获得「${selected.name}」`, "result");
+  return spin;
+}
+
 function finishShowdown(state: PokerGameState) {
   const contenders = playersInHand(state);
   const scored = new Map(contenders.map((player) => [player.id, bestScore([...player.hole, ...state.board])]));
@@ -479,6 +1032,7 @@ function finishShowdown(state: PokerGameState) {
     const player = state.players.find((item) => item.id === playerId)!;
     player.chips += amount;
   });
+  processShowdownParty(state, contenders, scored, awards);
   state.players.forEach((player) => {
     player.streetBet = 0;
     player.contribution = 0;
@@ -493,7 +1047,7 @@ function finishShowdown(state: PokerGameState) {
   addLog(state, state.resultText, "result");
   state.phase = "showdown";
   setTurn(state, null);
-  state.nextHandAt = Date.now() + 8_000;
+  state.nextHandAt = Date.now() + (state.roomMode === "party" ? 15_000 : 8_000);
   state.updatedAt = Date.now();
 }
 
@@ -524,6 +1078,18 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
   const maxRaiseTo = viewer ? viewer.streetBet + viewer.chips : 0;
   const minRaiseTo = Math.min(maxRaiseTo, state.currentBet + state.minRaise);
   const revealAll = state.phase === "showdown";
+  const roomMode = state.roomMode ?? "classic";
+  const party = roomMode === "party" ? ensurePartyState(state) : undefined;
+  const noRaise = !!viewer && state.phase === "preflop" && partyEffectsFor(state, "no_raise", viewer.id).length > 0;
+  const miniRaise = !!viewer && state.phase === "preflop" && partyEffectsFor(state, "mini_raise", viewer.id).length > 0;
+
+  const visibleHole = (player: GamePlayer) => {
+    if (player.id === viewerId || (revealAll && !player.folded)) return player.hole;
+    const indices = party?.reveals
+      .filter((reveal) => reveal.handNumber === state.handNumber && reveal.playerId === player.id && (reveal.viewerId === "all" || reveal.viewerId === viewerId))
+      .map((reveal) => reveal.cardIndex) ?? [];
+    return indices.length ? [...new Set(indices)].map((index) => player.hole[index]).filter(Boolean) as CardCode[] : null;
+  };
 
   return {
     room: {
@@ -535,6 +1101,7 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
       smallBlind: state.smallBlind,
       bigBlind: state.bigBlind,
       startingChips: state.startingChips,
+      mode: roomMode,
     },
     viewerId,
     version: state.version,
@@ -544,11 +1111,15 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
     turnSeat: state.turnSeat,
     board: state.board,
     pot: potSize(state),
-    players: state.players.map(({ email: _email, ...player }) => ({
-      ...player,
-      hole: player.id === viewerId || (revealAll && !player.folded) ? player.hole : null,
-      isOnline: player.isBot || Date.now() - player.lastSeenAt < 18_000,
-    })),
+    players: state.players.map((source) => {
+      const { email, ...player } = source;
+      void email;
+      return {
+        ...player,
+        hole: visibleHole(source),
+        isOnline: player.isBot || Date.now() - player.lastSeenAt < 18_000,
+      };
+    }),
     logs: state.logs.slice(-16),
     chats: state.chats.slice(-40),
     validActions: {
@@ -556,16 +1127,21 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
       canFold: isYourTurn,
       canCheck: isYourTurn && callAmount === 0,
       canCall: isYourTurn && callAmount > 0,
-      canRaise: isYourTurn && !!viewer && viewer.chips > callAmount && maxRaiseTo > state.currentBet,
+      canRaise: isYourTurn && !noRaise && !!viewer && viewer.chips > callAmount && maxRaiseTo > state.currentBet,
       callAmount: Math.min(callAmount, viewer?.chips ?? 0),
       minRaiseTo,
-      maxRaiseTo,
+      maxRaiseTo: miniRaise ? minRaiseTo : maxRaiseTo,
     },
     actionDeadline: state.actionDeadline,
     nextHandAt: state.nextHandAt,
     resultText: state.resultText,
     dealer: state.dealer ?? DEFAULT_DEALER,
     actionFeed: (state.actionFeed ?? []).slice(-6),
+    party: party ? {
+      ...party,
+      reveals: party.reveals.filter((reveal) => reveal.viewerId === "all" || reveal.viewerId === viewerId),
+      effectEvents: party.effectEvents.filter((event) => event.visibility === "all" || event.visibility === viewerId),
+    } : undefined,
   };
 }
 
@@ -581,6 +1157,8 @@ export function createInitialState(input: {
   smallBlind: number;
   bigBlind: number;
   bots: number;
+  roomMode?: "classic" | "party";
+  partyTriggers?: PartyTriggerId[];
 }) {
   const now = Date.now();
   const players: GamePlayer[] = [{
@@ -631,6 +1209,7 @@ export function createInitialState(input: {
     ownerId: input.ownerId,
     maxPlayers: input.maxPlayers,
     startingChips: input.startingChips,
+    roomMode: input.roomMode ?? "classic",
     smallBlind: input.smallBlind,
     bigBlind: input.bigBlind,
     version: 1,
@@ -651,6 +1230,15 @@ export function createInitialState(input: {
     resultText: "",
     dealer: { ...DEFAULT_DEALER },
     actionFeed: [],
+    party: input.roomMode === "party" ? {
+      enabledTriggers: input.partyTriggers?.length ? [...input.partyTriggers] : [...DEFAULT_PARTY_TRIGGERS],
+      maxStoredCredits: 3,
+      playerStates: Object.fromEntries(players.map((player) => [player.id, { playerId: player.id, credits: 0, achievementCount: 0, effects: [] }])),
+      reveals: [],
+      turnLeaderIds: [],
+      lastAwards: [],
+      effectEvents: [],
+    } : undefined,
     createdAt: now,
     updatedAt: now,
   };
@@ -660,7 +1248,11 @@ export function createInitialState(input: {
 export function addHumanPlayer(state: PokerGameState, user: { id: string; displayName: string; email: string }) {
   const existing = state.players.find((player) => player.id === user.id);
   if (existing) {
-    if (existing.isKicked) throw new Error("你已被房主移出，请等待当前手牌结束后再加入");
+    if (existing.isKicked) {
+      throw new Error(existing.leftVoluntarily
+        ? "你已离桌，请等待当前手牌结束后再加入"
+        : "你已被房主移出，请等待当前手牌结束后再加入");
+    }
     existing.name = user.displayName;
     existing.email = user.email;
     existing.lastSeenAt = Date.now();
@@ -689,6 +1281,7 @@ export function addHumanPlayer(state: PokerGameState, user: { id: string; displa
     isKicked: false,
     totalBuyIn: state.startingChips,
   });
+  if (state.roomMode === "party") ensurePartyPlayer(state, user.id);
   addLog(state, `${user.displayName} 加入了牌桌`, "system");
   if (state.phase === "waiting" && state.players.length >= 2) startHand(state);
   return state;
@@ -747,6 +1340,7 @@ export function addBotPlayer(state: PokerGameState, actorId: string) {
     totalBuyIn: state.startingChips,
   };
   state.players.push(bot);
+  if (state.roomMode === "party") ensurePartyPlayer(state, bot.id);
   addLog(state, `房主添加了机器人 ${bot.name}`, "system");
   if (state.phase === "waiting" && state.players.filter((player) => !player.isKicked).length >= 2) startHand(state);
   state.updatedAt = Date.now();
@@ -774,6 +1368,38 @@ export function kickPlayer(state: PokerGameState, actorId: string, targetId: str
   }
   state.updatedAt = Date.now();
   return target;
+}
+
+export function leavePlayer(state: PokerGameState, actorId: string) {
+  const player = state.players.find((item) => item.id === actorId && !item.isKicked);
+  if (!player || player.isBot) throw new Error("你已经不在这张牌桌");
+
+  const nextOwner = state.players.find(
+    (item) => item.id !== actorId && !item.isBot && !item.isKicked,
+  );
+  if (state.ownerId === actorId && nextOwner) {
+    state.ownerId = nextOwner.id;
+    addLog(state, `${nextOwner.name} 已接任房主`, "system");
+  }
+
+  const handActive = ["preflop", "flop", "turn", "river"].includes(state.phase)
+    && player.hole.length === 2;
+  addLog(state, `${player.name} 主动离开了牌桌`, "system");
+  if (handActive) {
+    player.isKicked = true;
+    player.leftVoluntarily = true;
+    player.folded = true;
+    player.acted = true;
+    player.lastAction = "已离桌";
+    if (player.seat === state.turnSeat) {
+      advanceAfterAction(state, player.seat);
+      runBots(state);
+    }
+  } else {
+    state.players = state.players.filter((item) => item.id !== actorId);
+  }
+  state.updatedAt = Date.now();
+  return player;
 }
 
 export function setDealerProfile(

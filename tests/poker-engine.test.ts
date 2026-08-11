@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { potFractionRaiseTarget } from "../lib/bet-sizing";
 import { getStrategyAdvice } from "../lib/strategy-advisor";
+import type { PartyRuntimeEffect } from "../lib/poker-types";
 import {
   addBotPlayer,
+  addHumanPlayer,
+  activatePartyEffect,
   applyPlayerAction,
+  configurePartyRules,
   createInitialState,
   kickPlayer,
+  leavePlayer,
   requestRebuy,
   setDealerProfile,
+  spinPartyWheel,
   startHand,
   toPublicView,
 } from "../lib/poker-engine";
@@ -79,6 +85,33 @@ test("owner can add and kick a bot", () => {
   assert.ok(bot.isKicked || !state.players.some((player) => player.id === bot.id));
 });
 
+test("leaving the table folds the player, preserves the pot and transfers the host", () => {
+  const state = createInitialState({
+    roomId: "room_leave",
+    code: "TONG-LEAVE1",
+    name: "离桌测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 0,
+  });
+  addHumanPlayer(state, { id: "human-2", displayName: "同学", email: "friend@example.com" });
+  const owner = state.players.find((player) => player.id === "human-1")!;
+  const contributed = owner.contribution;
+
+  leavePlayer(state, owner.id);
+
+  assert.equal(owner.isKicked, true);
+  assert.equal(owner.leftVoluntarily, true);
+  assert.equal(owner.folded, true);
+  assert.ok(state.lastPot >= contributed, "the chips already posted by the leaving player stay in the settled pot");
+  assert.equal(state.ownerId, "human-2");
+});
+
 test("pot fraction shortcut includes the call before sizing a raise", () => {
   const target = potFractionRaiseTarget({
     pot: 1000,
@@ -126,4 +159,219 @@ test("strategy advice produces a legal 100 percent mixed strategy", () => {
   assert.equal(premium.mix.check, 0);
   assert.ok(premium.mix.raise > weak.mix.raise);
   assert.ok(weak.mix.fold > premium.mix.fold);
+});
+
+test("party mode awards a wheel credit from a real showdown trigger", () => {
+  const state = createInitialState({
+    roomId: "room_party_award",
+    code: "TONG-PARTY1",
+    name: "娱乐成就测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 0,
+    roomMode: "party",
+    partyTriggers: ["quads"],
+  });
+  addHumanPlayer(state, { id: "human-2", displayName: "同学", email: "friend@example.com" });
+  const owner = state.players.find((player) => player.id === "human-1")!;
+  const friend = state.players.find((player) => player.id === "human-2")!;
+  owner.hole = ["AS", "AH"];
+  friend.hole = ["KS", "KH"];
+  state.board = ["AC", "AD", "2C", "3D", "4H"];
+  state.phase = "river";
+  state.currentBet = 0;
+  state.turnSeat = owner.seat;
+  owner.streetBet = 0;
+  friend.streetBet = 0;
+  owner.contribution = 100;
+  friend.contribution = 100;
+  owner.acted = false;
+  friend.acted = true;
+
+  applyPlayerAction(state, owner.id, "check");
+
+  assert.equal(state.phase, "showdown");
+  assert.equal(state.party?.playerStates[owner.id].credits, 1);
+  assert.equal(state.party?.lastAwards[0]?.triggerId, "quads");
+});
+
+test("party wheel result is server-selected and a manual skill executes on demand", () => {
+  const state = createInitialState({
+    roomId: "room_party_spin",
+    code: "TONG-PARTY2",
+    name: "娱乐转盘测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 1,
+    roomMode: "party",
+    partyTriggers: ["all_in_win"],
+  });
+  state.party!.playerStates["human-1"].credits = 1;
+  const spin = spinPartyWheel(state, "human-1", "human-1", () => 0);
+
+  assert.equal(spin.effectId, "sky_eye");
+  assert.equal(state.party?.playerStates["human-1"].credits, 0);
+  assert.equal(state.party?.playerStates["human-1"].effects[0].status, "pending");
+
+  startHand(state);
+  const runtimeEffect = state.party!.playerStates["human-1"].effects[0];
+  assert.equal(runtimeEffect.status, "pending");
+  activatePartyEffect(state, "human-1", runtimeEffect.id);
+  const bot = state.players.find((player) => player.isBot)!;
+  assert.equal(runtimeEffect.status, "used");
+  assert.equal(toPublicView(state, "human-1").players.find((player) => player.id === bot.id)?.hole?.length, 1);
+  assert.equal(state.party?.effectEvents.at(-1)?.kind, "executed");
+  assert.ok(!toPublicView(state, bot.id).party?.effectEvents.some((event) => event.detail.startsWith("已私下查看")));
+});
+
+test("manual public-card effects arm before the street and show the real redraw to everyone", () => {
+  const state = createInitialState({
+    roomId: "room_party_redraw",
+    code: "TONG-PARTY4",
+    name: "公共牌重铸测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 1,
+    roomMode: "party",
+  });
+  const owner = state.players.find((player) => player.id === "human-1")!;
+  const bot = state.players.find((player) => player.isBot)!;
+  state.phase = "flop";
+  state.board = ["2S", "3H", "4D"];
+  state.currentBet = 0;
+  state.turnSeat = owner.seat;
+  owner.folded = false;
+  owner.allIn = false;
+  owner.acted = false;
+  owner.streetBet = 0;
+  bot.folded = false;
+  bot.allIn = true;
+  bot.acted = true;
+  bot.streetBet = 0;
+  const effect: PartyRuntimeEffect = {
+    id: "effect-turn-redraw",
+    effectId: "turn_redraw",
+    awardedHand: state.handNumber - 1,
+    appliesHand: state.handNumber,
+    status: "pending",
+  };
+  state.party!.playerStates[owner.id].effects.push(effect);
+
+  activatePartyEffect(state, owner.id, effect.id);
+  assert.equal(effect.status, "active");
+  applyPlayerAction(state, owner.id, "check");
+
+  assert.equal(effect.status, "used");
+  const event = [...state.party!.effectEvents].reverse().find((item) => item.effectId === "turn_redraw" && item.kind === "executed")!;
+  assert.equal(event.presentation, "board_redraw");
+  assert.equal(event.cards?.length, 2);
+  assert.ok(event.cards?.[1] && state.board.includes(event.cards[1]));
+  assert.match(event.detail, /作废/);
+});
+
+test("unused manual party skills expire after their one-hand window", () => {
+  const state = createInitialState({
+    roomId: "room_party_expiry",
+    code: "TONG-PARTY5",
+    name: "技能过期测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 1,
+    roomMode: "party",
+  });
+  state.party!.playerStates["human-1"].credits = 1;
+  spinPartyWheel(state, "human-1", "human-1", () => 0);
+  const effect = state.party!.playerStates["human-1"].effects[0];
+  startHand(state);
+  state.phase = "showdown";
+  startHand(state);
+
+  assert.equal(effect.status, "expired");
+  assert.match(effect.detail ?? "", /自动失效/);
+  assert.ok(state.party?.effectEvents.some((event) => event.kind === "expired" && event.effectId === "sky_eye"));
+});
+
+test("pass-left is armed before the hand, really transfers cards and broadcasts the execution", () => {
+  const state = createInitialState({
+    roomId: "room_party_pass",
+    code: "TONG-PARTY6",
+    name: "传牌效果测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 2,
+    roomMode: "party",
+  });
+  state.phase = "showdown";
+  const effect: PartyRuntimeEffect = {
+    id: "effect-pass-left",
+    effectId: "pass_left",
+    awardedHand: state.handNumber,
+    appliesHand: state.handNumber + 1,
+    status: "pending",
+  };
+  state.party!.playerStates["human-1"].effects.push(effect);
+
+  activatePartyEffect(state, "human-1", effect.id);
+  assert.equal(effect.status, "active");
+  startHand(state);
+
+  assert.equal(effect.status, "used");
+  const holeCards = state.players.flatMap((player) => player.hole);
+  assert.equal(new Set(holeCards).size, holeCards.length);
+  assert.ok(state.party?.effectEvents.some((event) => event.effectId === "pass_left" && event.kind === "executed" && event.presentation === "pass_left"));
+});
+
+test("host controls party triggers and no-raise is enforced by the server", () => {
+  const state = createInitialState({
+    roomId: "room_party_rules",
+    code: "TONG-PARTY3",
+    name: "娱乐规则测试",
+    ownerId: "human-1",
+    ownerName: "房主",
+    ownerEmail: "host@example.com",
+    maxPlayers: 6,
+    startingChips: 5000,
+    smallBlind: 20,
+    bigBlind: 40,
+    bots: 1,
+    roomMode: "party",
+  });
+  configurePartyRules(state, "human-1", ["quads", "seven_two"]);
+  assert.deepEqual(state.party?.enabledTriggers, ["quads", "seven_two"]);
+  assert.throws(() => configurePartyRules(state, state.players.find((player) => player.isBot)!.id, ["quads"]), /只有房主/);
+
+  state.party!.playerStates["human-1"].effects.push({
+    id: "effect-no-raise",
+    effectId: "no_raise",
+    awardedHand: state.handNumber - 1,
+    appliesHand: state.handNumber,
+    status: "active",
+  });
+  assert.equal(toPublicView(state, "human-1").validActions.canRaise, false);
+  assert.throws(() => applyPlayerAction(state, "human-1", "raise", 80), /禁止加注/);
 });

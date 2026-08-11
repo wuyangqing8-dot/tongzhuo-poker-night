@@ -1,4 +1,5 @@
 import type { AuthenticatedUser } from "./poker-types";
+import { isLocalRequest, LOCAL_DEMO_USER } from "./local-auth";
 
 const idHeader = "oai-authenticated-user-id";
 const emailHeader = "oai-authenticated-user-email";
@@ -8,7 +9,10 @@ const encodingHeader = "oai-authenticated-user-full-name-encoding";
 export function getRequestUser(request: Request): AuthenticatedUser | null {
   const id = request.headers.get(idHeader);
   const email = request.headers.get(emailHeader);
-  if (!id || !email) return null;
+  if (!id || !email) {
+    if (!isLocalRequest(request)) return null;
+    return { ...LOCAL_DEMO_USER };
+  }
   const encodedName = request.headers.get(nameHeader);
   let displayName = email.split("@")[0] || "牌友";
   if (encodedName && request.headers.get(encodingHeader) === "percent-encoded-utf-8") {

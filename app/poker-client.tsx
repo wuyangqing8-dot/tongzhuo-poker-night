@@ -4,6 +4,10 @@ import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo,
 import type {
   AuthenticatedUser,
   CardCode,
+  PartyEffectEvent,
+  PartyRuntimeEffect,
+  PartySpin,
+  PartyTriggerId,
   PlayerAction,
   PublicGameView,
   PublicPlayer,
@@ -12,6 +16,10 @@ import type {
 import { potFractionRaiseTarget } from "../lib/bet-sizing";
 import { DEALER_PRESETS } from "../lib/dealer-options";
 import { getStrategyAdvice } from "../lib/strategy-advisor";
+import { DEFAULT_PARTY_TRIGGERS, ONLINE_PARTY_EFFECTS, ONLINE_PARTY_TRIGGERS, partyEffect } from "../lib/online-party";
+import OnlinePartyWheel from "./online-party-wheel";
+import PartyEffectOverlay from "./party-effect-overlay";
+import PokerRulesModal from "./poker-rules-modal";
 
 type ClientProps = {
   user: AuthenticatedUser;
@@ -104,7 +112,7 @@ function PlayerSeat({ player, position, dealer, active, phase, amountUnit, bigBl
       {(showBacks || player.hole?.length) && (
         <div className="opponent-cards" aria-label={`${player.name}的手牌`}>
           {player.hole?.length
-            ? player.hole.map((card, index) => <Card key={card} code={card} small delay={index * 60} />)
+            ? <>{player.hole.map((card, index) => <Card key={`${card}-${index}`} code={card} small delay={index * 60} />)}{Array.from({ length: Math.max(0, 2 - player.hole.length) }, (_, index) => <Card key={`party-hidden-${index}`} small hidden delay={(player.hole?.length ?? 0) * 60} />)}</>
             : <><Card small hidden /><Card small hidden delay={60} /></>}
         </div>
       )}
@@ -187,7 +195,7 @@ async function apiRequest(path: string, init?: RequestInit) {
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
-  const data = await response.json() as { error?: string; game?: PublicGameView; needsRoom?: boolean; needsJoin?: boolean };
+  const data = await response.json() as { error?: string; game?: PublicGameView; needsRoom?: boolean; needsJoin?: boolean; left?: boolean };
   if (response.status === 401) {
     window.location.href = `/signin-with-chatgpt?return_to=${encodeURIComponent(window.location.pathname + window.location.search)}`;
     throw new Error("需要登录");
@@ -204,10 +212,13 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const [toast, setToast] = useState("");
   const [view, setView] = useState<"table" | "lobby">("table");
   const [lobbyMode, setLobbyMode] = useState<"create" | "join">(initialRoomCode ? "join" : "create");
+  const [roomMode, setRoomMode] = useState<"classic" | "party">("classic");
+  const [partyTriggerDraft, setPartyTriggerDraft] = useState<PartyTriggerId[]>([...DEFAULT_PARTY_TRIGGERS]);
   const [joinCode, setJoinCode] = useState(initialRoomCode ?? "");
   const [showRules, setShowRules] = useState(false);
   const [showRebuy, setShowRebuy] = useState(false);
   const [showDealerSettings, setShowDealerSettings] = useState(false);
+  const [showPartySettings, setShowPartySettings] = useState(false);
   const [customDealerPreview, setCustomDealerPreview] = useState("");
   const [dealerPhotoBusy, setDealerPhotoBusy] = useState(false);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
@@ -218,8 +229,14 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const [showGto, setShowGto] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [dealBurst, setDealBurst] = useState<DealBurst | null>(null);
+  const [partyWheelOpen, setPartyWheelOpen] = useState(false);
+  const [partyWheelSpinning, setPartyWheelSpinning] = useState(false);
+  const [partyWheelRotation, setPartyWheelRotation] = useState(0);
+  const [partyWheelResult, setPartyWheelResult] = useState<PartySpin | null>(null);
+  const [partyTableEvent, setPartyTableEvent] = useState<PartyEffectEvent | null>(null);
   const polling = useRef(false);
   const previousDealState = useRef<{ handNumber: number; boardCount: number } | null>(null);
+  const previousPartyEventId = useRef<string | null>(null);
 
   const notify = useCallback((text: string) => {
     setToast(text);
@@ -293,6 +310,16 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     return () => window.clearTimeout(finish);
   }, [game?.handNumber, game?.board.length]);
 
+  const latestPartyEvent = game?.party?.effectEvents.at(-1);
+  useEffect(() => {
+    if (!latestPartyEvent || latestPartyEvent.id === previousPartyEventId.current) return;
+    previousPartyEventId.current = latestPartyEvent.id;
+    if (Date.now() - latestPartyEvent.at > 12_000) return;
+    setPartyTableEvent(latestPartyEvent);
+    const hide = window.setTimeout(() => setPartyTableEvent(null), latestPartyEvent.kind === "executed" ? 4_800 : 3_800);
+    return () => window.clearTimeout(hide);
+  }, [latestPartyEvent?.id]);
+
   async function createOrJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
@@ -308,6 +335,8 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             startingChips: Number(form.get("startingChips")),
             bigBlind: Number(form.get("bigBlind")),
             bots: Number(form.get("bots")),
+            gameMode: roomMode,
+            partyTriggers: roomMode === "party" ? partyTriggerDraft : [],
           };
       const data = await apiRequest("/api/rooms", { method: "POST", body: JSON.stringify(body) });
       if (data.game) {
@@ -347,6 +376,99 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     finally { setPending(false); }
   }
 
+  function togglePartyTrigger(triggerId: PartyTriggerId) {
+    setPartyTriggerDraft((current) => current.includes(triggerId)
+      ? current.filter((item) => item !== triggerId)
+      : [...current, triggerId]);
+  }
+
+  function openPartySettings() {
+    if (!game?.party) return;
+    setPartyTriggerDraft([...game.party.enabledTriggers]);
+    setShowPartySettings(true);
+  }
+
+  async function savePartySettings() {
+    if (!game || !partyTriggerDraft.length || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      const data = await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type: "party_config", triggers: partyTriggerDraft }),
+      });
+      if (data.game) setGame(data.game);
+      setShowPartySettings(false);
+      notify("娱乐触发条件已更新");
+    } catch (settingsError) {
+      setError(settingsError instanceof Error ? settingsError.message : "无法更新娱乐规则");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function spinOnlinePartyWheel(targetId: string) {
+    if (!game || pending || partyWheelSpinning) return;
+    setPending(true);
+    setPartyWheelOpen(true);
+    setPartyWheelResult(null);
+    setPartyWheelSpinning(true);
+    try {
+      const data = await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type: "party_spin", targetId }),
+      });
+      if (!data.game?.party?.lastSpin) throw new Error("服务器没有返回转盘结果");
+      const spin = data.game.party.lastSpin;
+      const segment = 360 / ONLINE_PARTY_EFFECTS.length;
+      const targetAngle = 360 - (spin.effectIndex * segment + segment / 2);
+      setPartyWheelRotation((current) => current + 6 * 360 + ((targetAngle - (current % 360) + 360) % 360));
+      setGame(data.game);
+      window.setTimeout(() => {
+        setPartyWheelResult(spin);
+        setPartyWheelSpinning(false);
+      }, 3900);
+    } catch (spinError) {
+      setPartyWheelOpen(false);
+      setPartyWheelSpinning(false);
+      setError(spinError instanceof Error ? spinError.message : "无法转动娱乐转盘");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  function canUsePartyEffect(effect: PartyRuntimeEffect, player: PublicPlayer) {
+    if (!game || effect.status !== "pending") return false;
+    const definition = partyEffect(effect.effectId);
+    const mayControl = player.id === game.viewerId || (player.isBot && game.room.ownerId === user.id);
+    if (!mayControl || definition?.control !== "manual") return false;
+    if (definition.useWindow === "before_hand") return ["waiting", "showdown"].includes(game.phase) && effect.appliesHand === game.handNumber + 1;
+    if (effect.appliesHand !== game.handNumber || player.folded) return false;
+    if (definition.useWindow === "preflop") return game.phase === "preflop";
+    if (definition.useWindow === "before_turn") return game.phase === "preflop" || game.phase === "flop";
+    if (definition.useWindow === "before_river") return game.phase === "preflop" || game.phase === "flop" || game.phase === "turn";
+    return false;
+  }
+
+  async function usePartyEffect(effectInstanceId: string) {
+    if (!game || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      const data = await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type: "party_use", effectInstanceId }),
+      });
+      if (data.game) setGame(data.game);
+      notify("娱乐效果已交给服务器执行");
+    } catch (effectError) {
+      setError(effectError instanceof Error ? effectError.message : "无法使用这个效果");
+      void loadGame(true);
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function sendMessage(event: FormEvent) {
     event.preventDefault();
     if (!game || !message.trim()) return;
@@ -363,6 +485,28 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     const link = `${window.location.origin}/?room=${encodeURIComponent(game.room.code)}`;
     try { await navigator.clipboard.writeText(link); notify("联机邀请链接已复制"); }
     catch { notify(`房间码：${game.room.code}`); }
+  }
+
+  async function leaveTable() {
+    if (!game || pending || !window.confirm("确定离开当前牌桌吗？本手牌会自动弃牌。")) return;
+    setPending(true);
+    setError("");
+    try {
+      await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type: "leave" }),
+      });
+      setGame(null);
+      setView("lobby");
+      setLobbyMode("join");
+      setJoinCode("");
+      window.history.replaceState({}, "", "/");
+      notify("已离开牌桌");
+    } catch (leaveError) {
+      setError(leaveError instanceof Error ? leaveError.message : "无法离开牌桌");
+    } finally {
+      setPending(false);
+    }
   }
 
   async function manageRoom(type: "rebuy" | "add_bot" | "kick", options?: { amount?: number; targetId?: string }) {
@@ -537,6 +681,8 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
               <label>房间码<input name="code" value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="TONG-XXXXXX" required /></label>
             ) : (
               <>
+                <fieldset className="mode-selector"><legend>选择牌桌模式</legend><button className={roomMode === "classic" ? "selected" : ""} type="button" onClick={() => setRoomMode("classic")}><span>♠</span><b>常规德州</b><small>标准规则、服务器洗牌与自动结算</small></button><button className={roomMode === "party" ? "selected party" : "party"} type="button" onClick={() => setRoomMode("party")}><span>🎡</span><b>娱乐德州</b><small>自动成就、服务器转盘与真实效果</small></button></fieldset>
+                {roomMode === "party" && <fieldset className="trigger-selector"><legend>房主选择自动触发条件</legend><div>{ONLINE_PARTY_TRIGGERS.map((trigger) => <label className={partyTriggerDraft.includes(trigger.id) ? "selected" : ""} key={trigger.id}><input type="checkbox" checked={partyTriggerDraft.includes(trigger.id)} onChange={() => togglePartyTrigger(trigger.id)} /><span><b>{trigger.name}</b><small>{trigger.description}</small></span></label>)}</div><p>结算满足条件后，服务器自动给对应玩家增加一次转盘资格；每人最多储存 3 次。</p></fieldset>}
                 <label>房间名字<input name="name" defaultValue="周五夜牌局" maxLength={24} required /></label>
                 <div className="form-row">
                   <label>座位数<select name="maxPlayers" defaultValue="6"><option value="4">4 人桌</option><option value="6">6 人桌</option></select></label>
@@ -552,6 +698,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             <button className="primary-action" type="submit" disabled={pending}>{pending ? "正在连接…" : lobbyMode === "join" ? "加入并入座" : "创建并开始"}</button>
           </form>
           <div className="account-strip"><span className="my-avatar">{initials(user.displayName)}</span><span><b>{user.displayName}</b><small>{user.email}</small></span><a href="/signout-with-chatgpt?return_to=/">退出</a></div>
+          <button className="lucky-entry-link" type="button" onClick={() => { setLobbyMode("create"); setRoomMode("party"); }}><span>🎡</span><b>创建线上娱乐德州</b><small>条件由房主选择，服务器自动判定并真实执行效果</small></button>
         </section>
         <p className="lobby-note">娱乐积分，无现金充值与提现</p>
       </main>
@@ -566,10 +713,13 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <button className="nav-item active" type="button">牌桌</button>
           <button className="nav-item" type="button" onClick={() => { setLobbyMode("create"); setError(""); setView("lobby"); }}>新房间</button>
           <button className="nav-item" type="button" onClick={() => { setLobbyMode("join"); setJoinCode(""); setError(""); setView("lobby"); }}>加入房间</button>
+          <button className="nav-item" type="button" onClick={() => { setLobbyMode("create"); setRoomMode("party"); setError(""); setView("lobby"); }}>娱乐桌</button>
           <button className="nav-item" type="button" onClick={() => setShowRules(true)}>规则</button>
         </nav>
           <div className="topbar-actions">
+            <span className={`table-mode-badge ${game.room.mode}`}>{game.room.mode === "party" ? "🎡 娱乐德州" : "♠ 常规德州"}</span>
             <span className="server-badge"><i /> 服务器已同步</span>
+            {game.room.mode === "party" && game.room.ownerId === user.id && <button className="party-settings-button" type="button" onClick={openPartySettings}>娱乐规则</button>}
             {game.room.ownerId === user.id && <button className="dealer-settings-button" type="button" onClick={openDealerSettings}>♣ 荷官</button>}
             <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
           <button className="invite-button" type="button" onClick={copyInvite}>＋ 邀请同学</button>
@@ -593,10 +743,11 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <div className="turn-banner">
             <div><span className="turn-label">{game.phase === "showdown" ? game.resultText : game.validActions.isYourTurn ? "轮到你了" : turnPlayer ? `${turnPlayer.name} 行动中` : "等待牌局开始"}</span><span className="turn-hint">{game.validActions.isYourTurn ? game.validActions.callAmount ? `需跟注 ${formatAmount(game.validActions.callAmount, game.room.bigBlind, amountUnit)}` : "可以过牌或加注" : "状态会自动同步"}</span></div>
             <span className="timer">{game.phase === "showdown" ? `下一手 ${nextHandSeconds}s` : secondsLeft ? `00:${String(secondsLeft).padStart(2, "0")}` : "LIVE"}</span>
-            <div className="timer-track"><span style={{ width: game.phase === "showdown" ? `${(nextHandSeconds / 8) * 100}%` : timerProgress }} /></div>
+            <div className="timer-track"><span style={{ width: game.phase === "showdown" ? `${(nextHandSeconds / (game.room.mode === "party" ? 15 : 8)) * 100}%` : timerProgress }} /></div>
           </div>
 
           <div className="poker-room">
+            <PartyEffectOverlay event={partyTableEvent} />
             <div className="ambient-copy ambient-left">SERVER SHUFFLED</div><div className="ambient-copy ambient-right">LIVE TABLE</div>
             <div className={`table-dealer ${dealBurst ? "is-dealing" : ""}`}>
               <button type="button" onClick={openDealerSettings} disabled={game.room.ownerId !== user.id} aria-label={game.room.ownerId === user.id ? "更换荷官" : `荷官 ${game.dealer.name}`}>
@@ -660,16 +811,47 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             <div className="mini-player-list">{game.players.filter((player) => !player.isKicked).map((player) => <div className="mini-player" key={player.id}><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}{player.isBot ? " · BOT" : ""}</b><small>{formatAmount(player.chips, game.room.bigBlind, amountUnit)}{amountUnit === "chips" ? " 筹码" : ""}{player.pendingRebuy ? ` · 待补 ${formatAmount(player.pendingRebuy, game.room.bigBlind, amountUnit)}` : ""}</small></span><span className="player-row-actions"><i className={player.isOnline ? "online-dot" : "away-dot"} />{game.room.ownerId === user.id && player.id !== user.id && <button type="button" onClick={() => kick(player)} disabled={pending}>移出</button>}</span></div>)}</div>
             {game.room.ownerId === user.id && <div className="host-tools"><button type="button" onClick={copyInvite}>＋ 邀请真人</button><button type="button" onClick={() => manageRoom("add_bot")} disabled={pending || game.players.filter((player) => !player.isKicked).length >= game.room.maxPlayers}>♟ 添加机器人</button></div>}
           </div>
+          {game.room.mode === "party" && game.party && (
+            <div className="party-room-card">
+              <div className="section-title"><span>🎡 转盘与技能栏</span><small>限时使用 · 服务器执行</small></div>
+              {game.party.lastAwards.length > 0 && <div className="party-award-banner"><b>刚刚触发</b>{game.party.lastAwards.map((award) => <span key={award.id}>{award.playerName} · {award.triggerName} +1</span>)}</div>}
+              <div className="party-player-list">
+                {game.players.filter((player) => !player.isKicked).map((player) => {
+                  const runtime = game.party?.playerStates[player.id];
+                  const effects = runtime?.effects.filter((effect) => effect.status === "pending" || effect.status === "active") ?? [];
+                  const canSpin = !!runtime?.credits && (player.id === game.viewerId || game.room.ownerId === user.id && player.isBot);
+                  return (
+                    <article key={player.id}>
+                      <div><b>{player.name}{player.isBot ? " · BOT" : ""}</b><small>成就 {runtime?.achievementCount ?? 0} · 转盘 {runtime?.credits ?? 0} 次</small></div>
+                      <button type="button" disabled={!canSpin || pending || partyWheelSpinning} onClick={() => spinOnlinePartyWheel(player.id)}>{runtime?.credits ? "开始转盘" : "等待触发"}</button>
+                      {effects.length > 0 && <div className="party-skill-list">{effects.map((effect) => {
+                        const definition = partyEffect(effect.effectId);
+                        const usable = canUsePartyEffect(effect, player);
+                        return <div className={`party-skill ${effect.status}`} key={effect.id}><span>{definition?.emoji ?? "✦"}</span><div><b>{definition?.name ?? effect.effectId}</b><small>{effect.status === "active" ? `已激活 · Hand #${effect.appliesHand}` : `${definition?.useWindowLabel ?? "下一手"} · 限 Hand #${effect.appliesHand}`}</small></div>{definition?.control === "manual" ? <button className="party-use-button" type="button" disabled={!usable || pending} onClick={() => usePartyEffect(effect.id)}>{effect.status === "active" ? "已激活" : usable ? "立即使用" : "等待时机"}</button> : <em>自动</em>}</div>;
+                      })}</div>}
+                    </article>
+                  );
+                })}
+              </div>
+              {game.party.effectEvents.length > 0 && <div className="party-event-history"><b>效果动态</b>{[...game.party.effectEvents].reverse().slice(0, 4).map((event) => <div key={event.id}><span>{event.emoji}</span><p><strong>{event.title}</strong><small>{event.detail}</small></p><em>H#{event.handNumber}</em></div>)}</div>}
+              {game.party.lastSpin && <div className="last-party-spin"><span>{game.party.lastSpin.emoji}</span><div><small>最近转盘结果</small><b>{game.party.lastSpin.playerName} · {game.party.lastSpin.effectName}</b></div></div>}
+            </div>
+          )}
           <div className="results-card"><div className="section-title"><span>本场输赢</span><small>含当前底池</small></div><div className="results-list">{sessionResults.map((player, index) => <div className="result-row" key={player.id}><span className="result-rank">{index + 1}</span><span className="mini-avatar" style={{ background: seatColors[player.seat % seatColors.length] }}>{initials(player.name)}</span><span><b>{player.name}{player.id === game.viewerId ? "（你）" : ""}</b><small>带入 {formatAmount(player.totalBuyIn ?? game.room.startingChips, game.room.bigBlind, amountUnit)}</small></span><strong className={player.net > 0 ? "net-win" : player.net < 0 ? "net-loss" : "net-even"}>{player.net > 0 ? "+" : ""}{formatAmount(player.net, game.room.bigBlind, amountUnit)}</strong></div>)}</div><p className="results-note">当前筹码与已投入底池，减去累计带入筹码</p></div>
           <div className="log-card"><div className="section-title"><span>行动记录</span><small>服务端</small></div><div className="game-logs">{[...game.logs].reverse().slice(0, 7).map((log) => <p className={log.kind} key={log.id}><time>{new Date(log.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{log.text}</p>)}</div></div>
           <div className="chat-card"><div className="section-title"><span>牌桌聊天</span><small>跨设备同步</small></div><div className="chat-messages">{game.chats.length ? game.chats.map((item) => <div className="chat-message" key={item.id}><span className="chat-avatar" style={{ background: seatColors[Math.abs(item.userId.length) % seatColors.length] }}>{initials(item.name).slice(0, 1)}</span><div><span className="chat-meta"><b>{item.name}</b><time>{new Date(item.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time></span><p>{item.text}</p></div></div>) : <p className="empty-chat">还没有消息，先打个招呼吧。</p>}</div><form className="chat-form" onSubmit={sendMessage}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="说点什么…" maxLength={120} aria-label="聊天消息" /><button type="submit" aria-label="发送">↗</button></form></div>
-          <a className="leave-room" href="/signout-with-chatgpt?return_to=/">退出账号</a>
+          <div className="room-exit-actions">
+            <button className="leave-table-button" type="button" onClick={leaveTable} disabled={pending}>离开牌桌</button>
+            <a className="leave-room" href="/signout-with-chatgpt?return_to=/">退出账号</a>
+          </div>
         </aside>
       </div>
 
       <button className="mobile-panel-toggle" type="button" onClick={() => setShowMobilePanel(!showMobilePanel)}>{showMobilePanel ? "收起动态" : "房间动态"}</button>
 
-      {showRules && <div className="modal-backdrop" onMouseDown={() => setShowRules(false)}><section className="modal-card rules-card" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowRules(false)}>×</button><span className="modal-kicker">正常德州规则</span><h2>这次，牌局是真的</h2><div className="rule-list"><div><b>01</b><span><strong>服务器安全洗牌</strong><small>每手使用加密随机数重新洗 52 张牌，前端拿不到牌堆。</small></span></div><div><b>02</b><span><strong>严格轮流行动</strong><small>过牌、跟注、加注、全下和超时均由服务器验证。</small></span></div><div><b>03</b><span><strong>自动结算边池</strong><small>支持平分底池、全下边池与七选五最佳牌型。</small></span></div></div><button className="primary-action" type="button" onClick={() => setShowRules(false)}>回到牌桌</button></section></div>}
+      {showRules && <PokerRulesModal mode={game.room.mode} enabledTriggers={game.party?.enabledTriggers ?? []} onClose={() => setShowRules(false)} />}
+      {showPartySettings && <div className="modal-backdrop"><section className="modal-card party-settings-modal" role="dialog" aria-modal="true" aria-label="娱乐德州设置"><button className="modal-close" type="button" onClick={() => setShowPartySettings(false)}>×</button><span className="modal-kicker">HOST PARTY CONFIG</span><h2>选择自动触发条件</h2><p>修改只影响之后结算的手牌。条件由服务器根据真实牌型和行动记录自动判断。</p><div className="party-trigger-settings">{ONLINE_PARTY_TRIGGERS.map((trigger) => <label className={partyTriggerDraft.includes(trigger.id) ? "selected" : ""} key={trigger.id}><input type="checkbox" checked={partyTriggerDraft.includes(trigger.id)} onChange={() => togglePartyTrigger(trigger.id)} /><span><b>{trigger.name}</b><small>{trigger.description}</small></span></label>)}</div><button className="primary-action" type="button" disabled={pending || !partyTriggerDraft.length} onClick={savePartySettings}>{pending ? "正在保存…" : `保存 ${partyTriggerDraft.length} 项条件`}</button></section></div>}
+      {partyWheelOpen && <OnlinePartyWheel rotation={partyWheelRotation} spinning={partyWheelSpinning} result={partyWheelResult} onClose={() => { if (!partyWheelSpinning) setPartyWheelOpen(false); }} />}
       {showDealerSettings && <div className="modal-backdrop" onMouseDown={() => setShowDealerSettings(false)}><section className="modal-card dealer-settings-card" role="dialog" aria-modal="true" aria-labelledby="dealer-settings-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowDealerSettings(false)}>×</button><span className="modal-kicker">DEALER SELECT</span><h2 id="dealer-settings-title">选择本桌荷官</h2><p>只有房主可以更换，所有玩家会实时看到同一位荷官。</p><div className="dealer-choice-grid">{DEALER_PRESETS.map((dealer) => <button className={game.dealer.id === dealer.id ? "selected" : ""} type="button" key={dealer.id} onClick={() => chooseDealer(dealer.id)} disabled={pending}><img src={dealer.image} alt="" /><span><b>{dealer.name}</b><small>{dealer.id === "classmate" ? "你的默认照片" : "内置人物"}</small></span>{game.dealer.id === dealer.id && <i>✓</i>}</button>)}</div><div className="custom-dealer-upload">{customDealerPreview ? <img src={customDealerPreview} alt="自定义荷官预览" /> : <span className="upload-placeholder">＋</span>}<span><b>使用自己的照片</b><small>自动裁成头像，仅保存到当前房间</small></span><label>{dealerPhotoBusy ? "处理中…" : "选择照片"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleDealerPhoto} disabled={dealerPhotoBusy || pending} /></label></div>{customDealerPreview && <button className="primary-action use-custom-dealer" type="button" onClick={() => chooseDealer("custom", customDealerPreview)} disabled={pending || dealerPhotoBusy}>{pending ? "正在同步…" : "使用这张照片"}</button>}<small className="dealer-privacy-note">照片会压缩后同步给本房间的玩家，请使用已获授权的图片。</small></section></div>}
       {showRebuy && <div className="modal-backdrop" onMouseDown={() => setShowRebuy(false)}><section className="modal-card rebuy-card" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowRebuy(false)}>×</button><span className="modal-kicker">REBUY</span><h2>补充桌面筹码</h2><p>牌局进行中提交的筹码会在下一手开始前到账，不会影响当前底池。</p><div className="rebuy-balance"><span>当前筹码</span><b>{viewer?.chips.toLocaleString() ?? 0}</b>{viewer?.pendingRebuy ? <small>已预约 +{viewer.pendingRebuy.toLocaleString()}</small> : <small>本桌上限 {(game.room.startingChips * 5).toLocaleString()}</small>}</div><div className="rebuy-options"><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: 1000 })}>+1,000</button><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: 3000 })}>+3,000</button><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: game.room.startingChips })}>+{game.room.startingChips.toLocaleString()}</button></div><small className="rebuy-note">娱乐积分，无充值与提现</small></section></div>}
       {toast && <div className="toast" role="status">✓ {toast}</div>}

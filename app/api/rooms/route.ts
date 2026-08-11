@@ -1,4 +1,6 @@
 import { addHumanPlayer, createInitialState, toPublicView } from "../../../lib/poker-engine";
+import { ONLINE_PARTY_TRIGGERS } from "../../../lib/online-party";
+import type { PartyTriggerId, PokerRoomMode } from "../../../lib/poker-types";
 import { getRequestUser, unauthorized } from "../../../lib/request-auth";
 import {
   addRoomMember,
@@ -26,6 +28,8 @@ export async function POST(request: Request) {
       startingChips?: number;
       bigBlind?: number;
       bots?: number;
+      gameMode?: PokerRoomMode;
+      partyTriggers?: PartyTriggerId[];
     };
 
     if (payload.mode === "join") {
@@ -44,6 +48,8 @@ export async function POST(request: Request) {
     const bigBlind = Math.max(10, Math.min(1000, Number(payload.bigBlind) || 40));
     const bots = Math.max(0, Math.min(maxPlayers - 1, Number(payload.bots) || 0));
     const code = await uniqueRoomCode();
+    const roomMode: PokerRoomMode = payload.gameMode === "party" ? "party" : "classic";
+    const partyTriggers = (payload.partyTriggers ?? []).filter((triggerId) => ONLINE_PARTY_TRIGGERS.some((trigger) => trigger.id === triggerId));
     const state = createInitialState({
       roomId: `room_${randomToken(10)}`,
       code,
@@ -56,6 +62,8 @@ export async function POST(request: Request) {
       smallBlind: Math.max(5, Math.floor(bigBlind / 2)),
       bigBlind,
       bots,
+      roomMode,
+      partyTriggers,
     });
     await createRoomRecord(state, user);
     return Response.json({ game: toPublicView(state, user.id) }, { status: 201 });

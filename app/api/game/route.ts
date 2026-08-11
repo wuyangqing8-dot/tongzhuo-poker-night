@@ -1,14 +1,18 @@
 import {
   addBotPlayer,
+  activatePartyEffect,
   applyPlayerAction,
+  configurePartyRules,
   kickPlayer,
+  leavePlayer,
   maybeAdvanceGame,
   requestRebuy,
   setDealerProfile,
+  spinPartyWheel,
   startHand,
   toPublicView,
 } from "../../../lib/poker-engine";
-import type { PlayerAction } from "../../../lib/poker-types";
+import type { PartyTriggerId, PlayerAction } from "../../../lib/poker-types";
 import { getRequestUser, unauthorized } from "../../../lib/request-auth";
 import {
   findRecentRoomForUser,
@@ -59,11 +63,13 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json() as {
       code?: string;
-      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "add_bot" | "set_dealer";
+      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "leave" | "add_bot" | "set_dealer" | "party_spin" | "party_config" | "party_use";
       action?: PlayerAction;
       amount?: number;
       message?: string;
       targetId?: string;
+      effectInstanceId?: string;
+      triggers?: PartyTriggerId[];
       dealer?: { presetId?: string; image?: string };
     };
     const room = await resolveRoom(user.id, payload.code);
@@ -73,6 +79,7 @@ export async function POST(request: Request) {
     player.lastSeenAt = Date.now();
 
     let kickedUserId: string | null = null;
+    let leftRoom = false;
     if (payload.type === "chat") {
       const text = payload.message?.trim().slice(0, 120) ?? "";
       if (!text) return Response.json({ error: "消息不能为空" }, { status: 400 });
@@ -98,9 +105,22 @@ export async function POST(request: Request) {
       const target = kickPlayer(room.state, user.id, targetId);
       if (!target.isBot) kickedUserId = target.id;
       await recordAction(room.state, user.id, "kick_player", target.seat);
+    } else if (payload.type === "leave") {
+      leavePlayer(room.state, user.id);
+      leftRoom = true;
+      await recordAction(room.state, user.id, "leave_room");
     } else if (payload.type === "set_dealer") {
       setDealerProfile(room.state, user.id, payload.dealer ?? {});
       await recordAction(room.state, user.id, "set_dealer");
+    } else if (payload.type === "party_config") {
+      configurePartyRules(room.state, user.id, payload.triggers ?? []);
+      await recordAction(room.state, user.id, "party_config");
+    } else if (payload.type === "party_spin") {
+      spinPartyWheel(room.state, user.id, payload.targetId ?? user.id);
+      await recordAction(room.state, user.id, "party_spin");
+    } else if (payload.type === "party_use") {
+      activatePartyEffect(room.state, user.id, payload.effectInstanceId ?? "");
+      await recordAction(room.state, user.id, "party_use");
     } else {
       const action = payload.action;
       if (!action || !["fold", "check", "call", "raise"].includes(action)) {
@@ -112,6 +132,10 @@ export async function POST(request: Request) {
 
     await saveState(room.state, room.version);
     if (kickedUserId) await removeRoomMember(room.state.roomId, kickedUserId);
+    if (leftRoom) {
+      await removeRoomMember(room.state.roomId, user.id);
+      return Response.json({ left: true, user });
+    }
     await touchMembership(room.state.roomId, user.id);
     return Response.json({ game: toPublicView(room.state, user.id), user });
   } catch (error) {

@@ -1,100 +1,124 @@
-# vinext-starter
+# 同桌 Poker Night / 娱乐德州 Lucky Poker
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+这个仓库包含两个互相独立但可从页面互相进入的娱乐工具：
 
-## Prerequisites
+- `/`：支持账号、房间、机器人和服务器发牌的线上德州牌桌。
+- `/lucky`：给朋友线下德州局使用的“成就 + 娱乐转盘 + Buff/Debuff”控制器。
 
-- Node.js `>=22.13.0`
+线上牌桌现在同时支持“常规德州”和“娱乐德州”。创建娱乐房间时，房主可以选择四条、同花顺、葫芦、72 杂色、All-in 获胜、河牌反超、Bad Beat、淘汰玩家等自动触发条件。服务器在真实结算后发放转盘资格，并强制执行看牌、公开底牌、换牌、免大盲、Preflop 禁止加注、Mini Raise、Turn/River 重发、随机 Turn、交换座位、皇帝 Button 和传牌等效果。
 
-## Quick Start
+房主可以在牌桌顶部的“娱乐规则”中随时修改之后手牌的触发条件；所有玩家可以在“规则”中查看本桌已启用条件、完整效果说明、执行时机和冲突限制。
+
+线上娱乐桌的转盘效果分为三类：立即结算、服务器自动执行、玩家主动使用。主动效果会进入牌桌右侧的技能栏，并标明限定 Hand 与使用窗口；例如换底牌只能在下一手翻牌前使用，Turn/River 重铸必须在对应公共牌发出前激活，座位交换、皇帝 Button 和向左传牌必须在下一手开始前使用。除免大盲外，错过限定手牌会自动过期。效果的获得、激活、真实执行和过期都会同步显示在牌桌中央以及效果动态中。
+
+Lucky Poker 不包含真实货币、充值、提现或支付功能。它不识别真实扑克牌，所有线下成就和特殊规则都由玩家人工确认，网页只负责抽取、提示、生命周期和记录。
+
+## 环境要求
+
+- Node.js `>= 22.13.0`
+- npm
+
+## 安装与启动
 
 ```bash
 npm install
 npm run dev
+```
+
+本地开发时，`http://localhost:3000/` 会自动使用“本地房主”体验账号，
+不需要访问线上 ChatGPT 登录页。发布后的站点不会启用这个本地账号，
+仍然使用平台提供的 ChatGPT 登录身份。
+
+开发服务器启动后打开：
+
+- `http://localhost:3000/lucky`：无需账号、无需后端的娱乐转盘。
+- `http://localhost:3000/`：原线上牌桌。
+
+生产构建和测试：
+
+```bash
 npm run build
+npm test
 ```
 
-This starter does not use `wrangler.jsonc`.
+## Lucky Poker 玩法
 
-## Included Shape
+1. 在“玩家”中准备 4～10 名玩家并选择当前玩家。
+2. 玩家在线下完成四条、抓诈唬、Bad Beat 等成就后，点击“触发成就”。
+3. 有转盘次数的玩家点击“开始转盘”。程序先按权重决定结果，再让转盘动画准确停到对应格子。
+4. 在结果卡中选择应用或放弃；需要目标的事件会要求先选择目标玩家。
+5. 应用后的 Buff/Debuff 显示在右侧，可标记使用、移除，下一手一次性效果会自动过期。
+6. 每手结束点击“开始下一手”，历史会记录成就、抽取、使用、过期和骰子结果。
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
+默认包含需求中的 12 个成就和 24 个转盘效果。命运骰子有独立数字动画；再来一次、谢谢参与、命运骰子会立即结算，不进入 Buff 列表。
 
-## Workspace Auth Headers
+## 配置转盘
 
-Signed-in visitors receive both `oai-authenticated-user-id` and `oai-authenticated-user-email`. Private Sites require every visitor to sign in; public Sites may also have anonymous visitors, for whom neither header is present.
+在“设置 → 转盘配置”中可以：
 
-The user ID is stable for the same user on the same Site and different across Sites. Email and name are intended for display or contact purposes.
+- 新增、删除效果；
+- 修改名称、emoji、说明和类别；
+- 调整权重或启用状态；
+- 查看每项根据所有启用权重计算出的实际概率。
 
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
+权重不必加总为 100。算法位于 `lib/lucky-wheel.ts`，视觉旋转只负责表现，不参与随机决定。初始项目位于 `lib/lucky-defaults.ts`。
 
-Treat the full name as optional and fall back to email when it is absent:
+## 配置成就
 
-```tsx
-import { headers } from "next/headers";
+在“设置 → 成就配置”中可新增、删除、改名、改说明、修改奖励次数和启用状态。默认成就同样位于 `lib/lucky-defaults.ts`。
 
-export default async function Home() {
-  const requestHeaders = await headers();
-  const userId = requestHeaders.get("oai-authenticated-user-id");
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
+## 游戏设置
 
-  const displayName = fullName ?? email;
-  // ...
-}
+“设置 → 游戏设置”包含：
+
+- 最大储存转盘次数：1 / 2 / 3 / 无限；
+- 每手最大特殊规则数量；
+- 双 River 的平分或随机模式；
+- 是否允许换底牌、看底牌、改公共牌、强制 Button、传牌；
+- 音效接口开关；
+- 二次确认后的全部数据重置。
+
+会改变公共牌或牌局规则的效果受并发上限保护。使用公共牌效果时，页面会再次提示必须在 Showdown 和底池结算前执行。
+
+## 数据与导出
+
+Lucky Poker 的所有数据保存在当前浏览器的 localStorage：
+
+```text
+lucky-poker-state-v1
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+其中包含玩家、转盘次数、Buff/Debuff、成就、转盘配置、Hand Number、设置和历史。刷新页面不会丢失，但换浏览器或设备不会自动同步。
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+历史页面支持按玩家、Hand 和事件类型筛选，也可以下载 JSON。浏览器隐私模式或手动清理站点数据会删除本地进度。
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+## 主要目录
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+```text
+app/
+  lucky/
+    components/          转盘、玩家卡、效果、历史和配置组件
+    lucky-poker-client.tsx
+    lucky-poker.css
+    use-lucky-game.ts    本地游戏状态 Hook
+    page.tsx
+  api/                   原线上牌桌 API
+  poker-client.tsx       原线上牌桌客户端
+lib/
+  lucky-defaults.ts      24 个效果与 12 个成就
+  lucky-storage.ts       localStorage 读写
+  lucky-types.ts         完整 TypeScript 数据类型
+  lucky-wheel.ts         加权随机与概率工具
+  poker-engine.ts        在线牌桌规则与离桌逻辑
+tests/
+  lucky-wheel.test.ts    权重公平性和次数上限测试
+  poker-engine.test.ts   发牌、行动、离桌等规则测试
+```
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+## 注意事项
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- 已结算的底池不能被特殊效果修改。
+- 河牌/转牌重铸后，第二张必须接受。
+- 上一手的下一手一次性效果会在再进入下一手时过期。
+- 使用按钮会锁定已处理效果，避免重复执行。
+- 线上牌桌与 Lucky Poker 的数据互不混用；Lucky Poker 完全可以离线、本地运行。

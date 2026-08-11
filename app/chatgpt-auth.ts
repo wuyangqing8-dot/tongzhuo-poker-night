@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { isLocalHost, LOCAL_DEMO_USER } from "../lib/local-auth";
 
 export type ChatGPTUser = {
   userId: string;
@@ -22,7 +23,18 @@ export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
   const userId = requestHeaders.get(USER_ID_HEADER);
   const email = requestHeaders.get(USER_EMAIL_HEADER);
-  if (!userId || !email) return null;
+  if (!userId || !email) {
+    const host =
+      requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host");
+    if (!isLocalHost(host)) return null;
+
+    return {
+      userId: LOCAL_DEMO_USER.id,
+      displayName: LOCAL_DEMO_USER.displayName,
+      email: LOCAL_DEMO_USER.email,
+      fullName: LOCAL_DEMO_USER.displayName,
+    };
+  }
 
   const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
   const fullName =

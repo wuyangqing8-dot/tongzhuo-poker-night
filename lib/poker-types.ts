@@ -3,6 +3,85 @@ export type Rank = "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "T" | "J" | "
 export type CardCode = `${Rank}${Suit}`;
 export type GamePhase = "waiting" | "preflop" | "flop" | "turn" | "river" | "showdown";
 export type PlayerAction = "fold" | "check" | "call" | "raise";
+export type PokerRoomMode = "classic" | "party";
+export type PartyTriggerId = "quads" | "straight_flush" | "full_house" | "seven_two" | "high_card" | "all_in_win" | "river_comeback" | "bad_beat" | "knockout";
+export type PartyEffectId = "sky_eye" | "public_card" | "peek_shield" | "river_redraw" | "turn_redraw" | "redraw_one" | "redraw_hand" | "free_big_blind" | "spin_again" | "get_peeked" | "open_card" | "no_raise" | "mini_raise" | "river_judgement" | "random_turn" | "seat_swap" | "emperor_button" | "pass_left" | "thanks";
+export type PartyEffectStatus = "pending" | "active" | "used" | "expired";
+export type PartyEffectEventKind = "awarded" | "armed" | "executed" | "expired";
+export type PartyEffectPresentation = "reward" | "reveal" | "hole_redraw" | "board_redraw" | "pass_left" | "seat_swap" | "shield" | "rule";
+
+export type PartyRuntimeEffect = {
+  id: string;
+  effectId: PartyEffectId;
+  awardedHand: number;
+  appliesHand: number;
+  status: PartyEffectStatus;
+  detail?: string;
+};
+
+export type PartyPlayerState = {
+  playerId: string;
+  credits: number;
+  achievementCount: number;
+  effects: PartyRuntimeEffect[];
+};
+
+export type PartyReveal = {
+  viewerId: string | "all";
+  playerId: string;
+  cardIndex: number;
+  handNumber: number;
+};
+
+export type PartyAward = {
+  id: string;
+  playerId: string;
+  playerName: string;
+  triggerId: PartyTriggerId;
+  triggerName: string;
+  handNumber: number;
+  at: number;
+};
+
+export type PartySpin = {
+  id: string;
+  playerId: string;
+  playerName: string;
+  effectId: PartyEffectId;
+  effectName: string;
+  emoji: string;
+  description: string;
+  effectIndex: number;
+  at: number;
+};
+
+export type PartyEffectEvent = {
+  id: string;
+  playerId: string;
+  playerName: string;
+  effectId: PartyEffectId;
+  effectName: string;
+  emoji: string;
+  kind: PartyEffectEventKind;
+  title: string;
+  detail: string;
+  handNumber: number;
+  at: number;
+  visibility: "all" | string;
+  presentation: PartyEffectPresentation;
+  cards?: CardCode[];
+};
+
+export type PartyGameState = {
+  enabledTriggers: PartyTriggerId[];
+  maxStoredCredits: number;
+  playerStates: Record<string, PartyPlayerState>;
+  reveals: PartyReveal[];
+  turnLeaderIds: string[];
+  lastAwards: PartyAward[];
+  lastSpin?: PartySpin;
+  effectEvents: PartyEffectEvent[];
+};
 
 export type DealerProfile = {
   id: string;
@@ -39,6 +118,7 @@ export type GamePlayer = {
   lastSeenAt: number;
   pendingRebuy?: number;
   isKicked?: boolean;
+  leftVoluntarily?: boolean;
   totalBuyIn?: number;
 };
 
@@ -64,6 +144,8 @@ export type PokerGameState = {
   ownerId: string;
   maxPlayers: number;
   startingChips: number;
+  roomMode?: PokerRoomMode;
+  party?: PartyGameState;
   smallBlind: number;
   bigBlind: number;
   version: number;
@@ -114,6 +196,7 @@ export type PublicGameView = {
     smallBlind: number;
     bigBlind: number;
     startingChips: number;
+    mode: PokerRoomMode;
   };
   viewerId: string;
   version: number;
@@ -132,6 +215,7 @@ export type PublicGameView = {
   resultText: string;
   dealer: DealerProfile;
   actionFeed: TableActionEvent[];
+  party?: PartyGameState;
 };
 
 export type AuthenticatedUser = {
