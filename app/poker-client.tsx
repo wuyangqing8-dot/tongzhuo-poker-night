@@ -519,7 +519,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   async function copyInvite() {
     if (!game) return;
     const link = `${window.location.origin}/?room=${encodeURIComponent(game.room.code)}`;
-    try { await navigator.clipboard.writeText(link); notify("联机邀请链接已复制"); }
+    try { await navigator.clipboard.writeText(link); notify("邀请链接已复制，同学可用自己的邮箱注册 / 登录"); }
     catch { notify(`房间码：${game.room.code}`); }
   }
 
@@ -760,7 +760,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             {game.room.mode === "party" && game.room.ownerId === user.id && <button className="party-settings-button" type="button" onClick={openPartySettings}>娱乐规则</button>}
             {game.room.ownerId === user.id && <button className="dealer-settings-button" type="button" onClick={openDealerSettings}>♣ 荷官</button>}
             <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
-          <button className="invite-button" type="button" onClick={copyInvite}>＋ 邀请同学</button>
+          <button className="invite-button" type="button" onClick={copyInvite}>＋ 邀请同学登录</button>
           <a className="my-avatar" href="/profile" title="查看个人主页" aria-label="查看个人主页">{initials(user.displayName)}</a>
         </div>
       </header>

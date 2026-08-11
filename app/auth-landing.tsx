@@ -32,11 +32,14 @@ export default function AuthLanding({ user, tablePath, signInPath, roomCode }: A
           <p>每个邮箱对应独立账号。服务器随机洗牌、实时同步行动并自动结算，换设备登录后仍能找回自己的座位与牌局战绩。</p>
 
           {user ? (
-            <div className="entry-signed-card">
-              <span>{[...user.displayName].slice(0, 2).join("").toUpperCase()}</span>
-              <div><small>当前已登录</small><b>{user.displayName}</b><em>{user.email}</em></div>
-              <i>✓</i>
-            </div>
+            <>
+              <div className="entry-signed-card">
+                <span>{[...user.displayName].slice(0, 2).join("").toUpperCase()}</span>
+                <div><small>当前已登录</small><b>{user.displayName}</b><em>{user.email}</em></div>
+                <i>✓</i>
+              </div>
+              <div className="entry-account-guide"><b>要邀请同学一起玩？</b><span>把房间邀请链接发给同学，他们会用自己的邮箱注册 / 登录，不会进入你的账号。</span></div>
+            </>
           ) : (
             <div className="entry-auth-note"><span>✦</span><p><b>没有单独的牌桌密码</b><small>登录和注册由官方账号页面完成；本站不会保存你的邮箱密码。</small></p></div>
           )}
