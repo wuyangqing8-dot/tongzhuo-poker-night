@@ -120,6 +120,16 @@ export type GamePlayer = {
   isKicked?: boolean;
   leftVoluntarily?: boolean;
   totalBuyIn?: number;
+  handStartChips?: number;
+};
+
+export type HandPlayerResult = {
+  playerId: string;
+  playerName: string;
+  chipsBefore: number;
+  chipsAfter: number;
+  net: number;
+  won: boolean;
 };
 
 export type GameLog = {
@@ -169,6 +179,7 @@ export type PokerGameState = {
   resultText: string;
   dealer?: DealerProfile;
   actionFeed?: TableActionEvent[];
+  lastHandResults?: HandPlayerResult[];
   createdAt: number;
   updatedAt: number;
 };

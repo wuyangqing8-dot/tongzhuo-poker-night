@@ -58,3 +58,27 @@ export const gameActions = sqliteTable(
   },
   (table) => [index("idx_game_actions_room_id").on(table.roomId, table.id)],
 );
+
+export const handResults = sqliteTable(
+  "hand_results",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    roomId: text("room_id").notNull(),
+    roomCode: text("room_code").notNull(),
+    roomName: text("room_name").notNull(),
+    roomMode: text("room_mode").notNull(),
+    handNumber: integer("hand_number").notNull(),
+    userId: text("user_id").notNull(),
+    playerName: text("player_name").notNull(),
+    net: integer("net").notNull(),
+    endingChips: integer("ending_chips").notNull(),
+    won: integer("won", { mode: "boolean" }).notNull(),
+    resultText: text("result_text").notNull(),
+    completedAt: integer("completed_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("idx_hand_results_unique_player_hand").on(table.roomId, table.handNumber, table.userId),
+    index("idx_hand_results_user_completed").on(table.userId, table.completedAt),
+    index("idx_hand_results_room_hand").on(table.roomId, table.handNumber),
+  ],
+);

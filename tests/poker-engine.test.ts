@@ -230,6 +230,12 @@ test("party mode awards a wheel credit from a real showdown trigger", () => {
   assert.equal(state.phase, "showdown");
   assert.equal(state.party?.playerStates[owner.id].credits, 1);
   assert.equal(state.party?.lastAwards[0]?.triggerId, "quads");
+  assert.equal(state.lastHandResults?.length, 2);
+  const ownerResult = state.lastHandResults?.find((result) => result.playerId === owner.id);
+  const friendResult = state.lastHandResults?.find((result) => result.playerId === friend.id);
+  assert.equal(ownerResult?.won, true);
+  assert.equal(friendResult?.won, false);
+  assert.ok((ownerResult?.net ?? 0) > (friendResult?.net ?? 0));
 });
 
 test("party wheel result is server-selected and a manual skill executes on demand", () => {

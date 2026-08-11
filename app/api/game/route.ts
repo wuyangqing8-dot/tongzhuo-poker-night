@@ -19,6 +19,7 @@ import {
   findRecentRoomForUser,
   findRoomByCode,
   recordAction,
+  recordCompletedHand,
   removeRoomMember,
   saveState,
   touchMembership,
@@ -48,9 +49,13 @@ export async function GET(request: Request) {
       try { await saveState(room.state, room.version); } catch (error) {
         if (!(error instanceof Error && error.message === "STATE_CONFLICT")) throw error;
         const fresh = await resolveRoom(user.id, code);
-        if (fresh) return Response.json({ game: toPublicView(fresh.state, user.id), user });
+        if (fresh) {
+          await recordCompletedHand(fresh.state);
+          return Response.json({ game: toPublicView(fresh.state, user.id), user });
+        }
       }
     }
+    await recordCompletedHand(room.state);
     await touchMembership(room.state.roomId, user.id);
     return Response.json({ game: toPublicView(room.state, user.id), user });
   } catch (error) {
@@ -136,6 +141,7 @@ export async function POST(request: Request) {
     }
 
     await saveState(room.state, room.version);
+    await recordCompletedHand(room.state);
     if (kickedUserId) await removeRoomMember(room.state.roomId, kickedUserId);
     if (leftRoom) {
       await removeRoomMember(room.state.roomId, user.id);

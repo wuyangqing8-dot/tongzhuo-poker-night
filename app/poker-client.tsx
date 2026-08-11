@@ -716,7 +716,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             {error && <p className="form-error">{error}</p>}
             <button className="primary-action" type="submit" disabled={pending}>{pending ? "正在连接…" : lobbyMode === "join" ? "加入并入座" : "创建并开始"}</button>
           </form>
-          <div className="account-strip"><span className="my-avatar">{initials(user.displayName)}</span><span><b>{user.displayName}</b><small>{user.email}</small></span><a href="/signout-with-chatgpt?return_to=/">退出</a></div>
+          <div className="account-strip"><span className="my-avatar">{initials(user.displayName)}</span><span><b>{user.displayName}</b><small>{user.email}</small></span><span className="account-links"><a href="/profile">个人战绩</a><a href="/signout-with-chatgpt?return_to=/">退出</a></span></div>
           <button className="lucky-entry-link" type="button" onClick={() => { setLobbyMode("create"); setRoomMode("party"); }}><span>🎡</span><b>创建线上娱乐德州</b><small>条件由房主选择，服务器自动判定并真实执行效果</small></button>
         </section>
         <p className="lobby-note">娱乐积分，无现金充值与提现</p>
@@ -743,7 +743,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
             {game.room.ownerId === user.id && <button className="dealer-settings-button" type="button" onClick={openDealerSettings}>♣ 荷官</button>}
             <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
           <button className="invite-button" type="button" onClick={copyInvite}>＋ 邀请同学</button>
-          <span className="my-avatar" title={user.displayName}>{initials(user.displayName)}</span>
+          <a className="my-avatar" href="/profile" title="查看个人主页" aria-label="查看个人主页">{initials(user.displayName)}</a>
         </div>
       </header>
 

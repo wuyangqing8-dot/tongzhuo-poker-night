@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import type { AuthenticatedUser, PokerGameState } from "./poker-types";
+import type { PlayerProfile, ProfileHandResult, ProfileRoomSummary } from "./profile-types";
 
 type RoomRow = {
   id: string;
@@ -58,10 +59,28 @@ export async function ensurePokerSchema() {
         amount INTEGER DEFAULT 0 NOT NULL,
         created_at INTEGER NOT NULL
       )`),
+      database.prepare(`CREATE TABLE IF NOT EXISTS hand_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        room_id TEXT NOT NULL,
+        room_code TEXT NOT NULL,
+        room_name TEXT NOT NULL,
+        room_mode TEXT NOT NULL,
+        hand_number INTEGER NOT NULL,
+        user_id TEXT NOT NULL,
+        player_name TEXT NOT NULL,
+        net INTEGER NOT NULL,
+        ending_chips INTEGER NOT NULL,
+        won INTEGER NOT NULL,
+        result_text TEXT NOT NULL,
+        completed_at INTEGER NOT NULL
+      )`),
       database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_rooms_code ON rooms(code)"),
       database.prepare("CREATE INDEX IF NOT EXISTS idx_rooms_updated_at ON rooms(updated_at)"),
       database.prepare("CREATE INDEX IF NOT EXISTS idx_room_members_user_updated ON room_members(user_id, updated_at)"),
       database.prepare("CREATE INDEX IF NOT EXISTS idx_game_actions_room_id ON game_actions(room_id, id)"),
+      database.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_hand_results_unique_player_hand ON hand_results(room_id, hand_number, user_id)"),
+      database.prepare("CREATE INDEX IF NOT EXISTS idx_hand_results_user_completed ON hand_results(user_id, completed_at)"),
+      database.prepare("CREATE INDEX IF NOT EXISTS idx_hand_results_room_hand ON hand_results(room_id, hand_number)"),
     ]);
   })().catch((error) => {
     schemaReady = null;
@@ -171,6 +190,155 @@ export async function recordAction(state: PokerGameState, actorId: string, actio
   await db().prepare(`INSERT INTO game_actions (room_id, hand_number, actor_id, action, amount, created_at)
     VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(state.roomId, state.handNumber, actorId, action, amount, Date.now()).run();
+}
+
+export async function recordCompletedHand(state: PokerGameState) {
+  if (state.phase !== "showdown" || state.handNumber <= 0) return;
+  await ensurePokerSchema();
+  const outcomes = state.lastHandResults ?? state.players
+    .filter((player) => player.hole.length === 2)
+    .map((player) => ({
+      playerId: player.id,
+      playerName: player.name,
+      chipsBefore: player.handStartChips ?? player.chips,
+      chipsAfter: player.chips,
+      net: player.chips - (player.handStartChips ?? player.chips),
+      won: false,
+    }));
+  const humanOutcomes = outcomes.filter((outcome) => {
+    const player = state.players.find((item) => item.id === outcome.playerId);
+    return player && !player.isBot;
+  });
+  if (!humanOutcomes.length) return;
+  const completedAt = state.updatedAt || Date.now();
+  await db().batch(humanOutcomes.map((outcome) => db().prepare(`INSERT INTO hand_results
+    (room_id, room_code, room_name, room_mode, hand_number, user_id, player_name, net, ending_chips, won, result_text, completed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(room_id, hand_number, user_id) DO NOTHING`)
+    .bind(
+      state.roomId,
+      state.roomCode,
+      state.roomName,
+      state.roomMode ?? "classic",
+      state.handNumber,
+      outcome.playerId,
+      outcome.playerName,
+      outcome.net,
+      outcome.chipsAfter,
+      outcome.won ? 1 : 0,
+      state.resultText || `Hand #${state.handNumber} 结束`,
+      completedAt,
+    )));
+}
+
+type ProfileAggregateRow = {
+  total_hands: number;
+  wins: number;
+  total_net: number;
+  best_hand: number;
+  worst_hand: number;
+  rooms: number;
+  biggest_ending_stack: number;
+};
+
+type ProfileHandRow = {
+  id: number;
+  room_id: string;
+  room_code: string;
+  room_name: string;
+  room_mode: string;
+  hand_number: number;
+  net: number;
+  ending_chips: number;
+  won: number;
+  result_text: string;
+  completed_at: number;
+};
+
+type ProfileRoomRow = {
+  room_id: string;
+  room_code: string;
+  room_name: string;
+  room_mode: string;
+  hands: number;
+  wins: number;
+  net: number;
+  ending_chips: number;
+  last_played_at: number;
+};
+
+export async function getPlayerProfile(user: AuthenticatedUser): Promise<PlayerProfile> {
+  await upsertUser(user);
+  const database = db();
+  const [aggregate, recentResult, roomResult, userRow] = await Promise.all([
+    database.prepare(`SELECT
+      COUNT(*) AS total_hands,
+      COALESCE(SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END), 0) AS wins,
+      COALESCE(SUM(net), 0) AS total_net,
+      COALESCE(MAX(net), 0) AS best_hand,
+      COALESCE(MIN(net), 0) AS worst_hand,
+      COUNT(DISTINCT room_id) AS rooms,
+      COALESCE(MAX(ending_chips), 0) AS biggest_ending_stack
+      FROM hand_results WHERE user_id = ?`).bind(user.id).first<ProfileAggregateRow>(),
+    database.prepare(`SELECT id, room_id, room_code, room_name, room_mode, hand_number, net,
+      ending_chips, won, result_text, completed_at
+      FROM hand_results WHERE user_id = ? ORDER BY completed_at DESC, id DESC LIMIT 30`)
+      .bind(user.id).all<ProfileHandRow>(),
+    database.prepare(`SELECT room_id, MAX(room_code) AS room_code, MAX(room_name) AS room_name,
+      MAX(room_mode) AS room_mode, COUNT(*) AS hands,
+      SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) AS wins, SUM(net) AS net,
+      MAX(ending_chips) AS ending_chips, MAX(completed_at) AS last_played_at
+      FROM hand_results WHERE user_id = ? GROUP BY room_id ORDER BY last_played_at DESC LIMIT 12`)
+      .bind(user.id).all<ProfileRoomRow>(),
+    database.prepare("SELECT created_at FROM users WHERE id = ? LIMIT 1").bind(user.id).first<{ created_at: number }>(),
+  ]);
+  const recentHands: ProfileHandResult[] = (recentResult.results ?? []).map((row) => ({
+    id: row.id,
+    roomId: row.room_id,
+    roomCode: row.room_code,
+    roomName: row.room_name,
+    roomMode: row.room_mode === "party" ? "party" : "classic",
+    handNumber: row.hand_number,
+    net: row.net,
+    endingChips: row.ending_chips,
+    won: Boolean(row.won),
+    resultText: row.result_text,
+    completedAt: row.completed_at,
+  }));
+  const rooms: ProfileRoomSummary[] = (roomResult.results ?? []).map((row) => ({
+    roomId: row.room_id,
+    roomCode: row.room_code,
+    roomName: row.room_name,
+    roomMode: row.room_mode === "party" ? "party" : "classic",
+    hands: row.hands,
+    wins: row.wins,
+    net: row.net,
+    endingChips: row.ending_chips,
+    lastPlayedAt: row.last_played_at,
+  }));
+  let currentWinStreak = 0;
+  for (const hand of recentHands) {
+    if (!hand.won) break;
+    currentWinStreak += 1;
+  }
+  const totalHands = aggregate?.total_hands ?? 0;
+  const wins = aggregate?.wins ?? 0;
+  return {
+    user: { id: user.id, email: user.email, displayName: user.displayName, createdAt: userRow?.created_at ?? Date.now() },
+    summary: {
+      totalHands,
+      wins,
+      winRate: totalHands ? Math.round((wins / totalHands) * 1000) / 10 : 0,
+      totalNet: aggregate?.total_net ?? 0,
+      bestHand: aggregate?.best_hand ?? 0,
+      worstHand: aggregate?.worst_hand ?? 0,
+      rooms: aggregate?.rooms ?? 0,
+      biggestEndingStack: aggregate?.biggest_ending_stack ?? 0,
+      currentWinStreak,
+    },
+    recentHands,
+    rooms,
+  };
 }
 
 export function randomToken(bytes = 12) {

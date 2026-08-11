@@ -400,6 +400,7 @@ export function startHand(state: PokerGameState) {
   state.resultText = "";
   state.nextHandAt = null;
   state.actionFeed = [];
+  state.lastHandResults = [];
 
   state.players.forEach((player) => {
     player.streetBet = 0;
@@ -409,6 +410,7 @@ export function startHand(state: PokerGameState) {
     player.allIn = false;
     player.acted = false;
     player.lastAction = player.chips <= 0 ? "等待补充筹码" : "等待行动";
+    player.handStartChips = player.chips;
   });
 
   const dealOrder: GamePlayer[] = [];
@@ -466,6 +468,22 @@ function streetComplete(state: PokerGameState) {
   return actors.every((player) => player.acted && player.streetBet === state.currentBet);
 }
 
+function captureHandResults(state: PokerGameState, winnerIds: Set<string>) {
+  state.lastHandResults = state.players
+    .filter((player) => player.hole.length === 2)
+    .map((player) => {
+      const chipsBefore = player.handStartChips ?? player.chips;
+      return {
+        playerId: player.id,
+        playerName: player.name,
+        chipsBefore,
+        chipsAfter: player.chips,
+        net: player.chips - chipsBefore,
+        won: winnerIds.has(player.id),
+      };
+    });
+}
+
 function finishUncontested(state: PokerGameState, winner: GamePlayer) {
   const pot = state.players.reduce((sum, player) => sum + player.contribution, 0);
   winner.chips += pot;
@@ -478,6 +496,7 @@ function finishUncontested(state: PokerGameState, winner: GamePlayer) {
   }
   state.lastPot = pot;
   state.resultText = `${winner.name} 赢得 ${pot.toLocaleString()} 筹码`;
+  captureHandResults(state, new Set([winner.id]));
   addLog(state, state.resultText, "result");
   state.players.forEach((player) => {
     player.streetBet = 0;
@@ -1071,6 +1090,7 @@ function finishShowdown(state: PokerGameState) {
     player.chips += amount;
   });
   processShowdownParty(state, contenders, scored, awards);
+  captureHandResults(state, new Set(awards.keys()));
   state.players.forEach((player) => {
     player.streetBet = 0;
     player.contribution = 0;

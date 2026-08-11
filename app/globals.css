@@ -318,6 +318,7 @@ select:focus-visible {
   background: var(--coral);
   color: var(--white);
   font-size: 12px;
+  text-decoration: none;
 }
 
 .game-heading {
@@ -2254,6 +2255,8 @@ select:focus-visible {
 .account-strip b { font-size: 10px; }
 .account-strip small { color: var(--muted); font-size: 8px; }
 .account-strip a { color: var(--muted); font-size: 9px; text-decoration: none; }
+.account-links { display: flex; align-items: center; gap: 10px; }
+.account-strip .account-links a:first-child { color: var(--coral-dark); font-weight: 800; }
 
 .lobby-note {
   position: relative;
