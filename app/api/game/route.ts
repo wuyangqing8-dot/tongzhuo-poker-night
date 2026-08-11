@@ -4,6 +4,7 @@ import {
   kickPlayer,
   maybeAdvanceGame,
   requestRebuy,
+  setDealerProfile,
   startHand,
   toPublicView,
 } from "../../../lib/poker-engine";
@@ -58,11 +59,12 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json() as {
       code?: string;
-      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "add_bot";
+      type?: "action" | "chat" | "start" | "rebuy" | "kick" | "add_bot" | "set_dealer";
       action?: PlayerAction;
       amount?: number;
       message?: string;
       targetId?: string;
+      dealer?: { presetId?: string; image?: string };
     };
     const room = await resolveRoom(user.id, payload.code);
     if (!room) return Response.json({ error: "房间不存在" }, { status: 404 });
@@ -96,6 +98,9 @@ export async function POST(request: Request) {
       const target = kickPlayer(room.state, user.id, targetId);
       if (!target.isBot) kickedUserId = target.id;
       await recordAction(room.state, user.id, "kick_player", target.seat);
+    } else if (payload.type === "set_dealer") {
+      setDealerProfile(room.state, user.id, payload.dealer ?? {});
+      await recordAction(room.state, user.id, "set_dealer");
     } else {
       const action = payload.action;
       if (!action || !["fold", "check", "call", "raise"].includes(action)) {

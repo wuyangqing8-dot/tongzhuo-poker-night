@@ -4,6 +4,13 @@ export type CardCode = `${Rank}${Suit}`;
 export type GamePhase = "waiting" | "preflop" | "flop" | "turn" | "river" | "showdown";
 export type PlayerAction = "fold" | "check" | "call" | "raise";
 
+export type DealerProfile = {
+  id: string;
+  name: string;
+  image: string;
+  isCustom: boolean;
+};
+
 export type GamePlayer = {
   id: string;
   name: string;
@@ -64,6 +71,7 @@ export type PokerGameState = {
   nextHandAt: number | null;
   lastPot: number;
   resultText: string;
+  dealer?: DealerProfile;
   createdAt: number;
   updatedAt: number;
 };
@@ -110,6 +118,7 @@ export type PublicGameView = {
   actionDeadline: number | null;
   nextHandAt: number | null;
   resultText: string;
+  dealer: DealerProfile;
 };
 
 export type AuthenticatedUser = {

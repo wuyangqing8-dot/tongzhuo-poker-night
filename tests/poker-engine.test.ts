@@ -7,6 +7,7 @@ import {
   createInitialState,
   kickPlayer,
   requestRebuy,
+  setDealerProfile,
   startHand,
   toPublicView,
 } from "../lib/poker-engine";
@@ -88,4 +89,12 @@ test("pot fraction shortcut includes the call before sizing a raise", () => {
     maxRaiseTo: 5000,
   });
   assert.equal(target, 800);
+});
+
+test("dealer starts with the supplied photo and only the owner can change it", () => {
+  const state = newThreePlayerGame();
+  assert.equal(toPublicView(state, "human-1").dealer.image, "/dealers/classmate.png");
+  setDealerProfile(state, "human-1", { presetId: "lan" });
+  assert.equal(state.dealer?.name, "阿岚");
+  assert.throws(() => setDealerProfile(state, state.players[1].id, { presetId: "chen" }), /只有房主/);
 });

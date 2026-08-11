@@ -229,6 +229,20 @@ select:focus-visible {
   cursor: pointer;
 }
 
+.dealer-settings-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #c9beb2;
+  border-radius: 10px;
+  background: #f7f1e9;
+  color: #594d46;
+  font-size: 11px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.dealer-settings-button:hover { border-color: var(--coral); color: var(--coral-dark); }
+
 .chip-button:hover { background: #ffefbf; }
 
 .invite-button:hover,
@@ -413,6 +427,153 @@ select:focus-visible {
   border: 1px solid rgba(94, 73, 61, 0.12);
   border-radius: 15px;
   pointer-events: none;
+}
+
+.table-dealer {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: grid;
+  justify-items: center;
+}
+
+.table-dealer > button {
+  position: relative;
+  border: 0;
+  padding: 0;
+  display: grid;
+  justify-items: center;
+  background: transparent;
+  cursor: pointer;
+}
+
+.table-dealer > button:disabled { opacity: 1; cursor: default; }
+
+.table-dealer img {
+  width: 82px;
+  height: 102px;
+  border: 4px solid #f9f1e7;
+  border-radius: 42px 42px 15px 15px;
+  object-fit: cover;
+  object-position: center top;
+  background: #5687e4;
+  box-shadow: 0 6px 18px rgba(43, 32, 29, 0.25);
+  transition: transform 180ms ease;
+}
+
+.table-dealer > button:not(:disabled):hover img { transform: translateY(-2px); }
+
+.table-dealer > button > span {
+  position: absolute;
+  left: 50%;
+  bottom: -17px;
+  min-width: 92px;
+  transform: translateX(-50%);
+  display: grid;
+  padding: 4px 8px;
+  border: 1px solid #cfc2b6;
+  border-radius: 8px;
+  background: #fffaf3;
+  text-align: center;
+  box-shadow: 0 3px 8px rgba(46, 32, 27, 0.15);
+}
+
+.table-dealer > button b { font-size: 9px; }
+.table-dealer > button small { color: var(--muted); font-size: 6px; }
+
+.dealer-card-stack {
+  position: absolute;
+  z-index: -1;
+  right: -22px;
+  bottom: 1px;
+  width: 24px;
+  height: 33px;
+  transform: rotate(12deg);
+}
+
+.dealer-card-stack span {
+  position: absolute;
+  inset: 0;
+  border: 2px solid #f3ded0;
+  border-radius: 4px;
+  background: #c95a45;
+  box-shadow: 0 2px 4px rgba(45, 29, 24, 0.2);
+}
+
+.dealer-card-stack span:nth-child(2) { transform: translate(-4px, 2px) rotate(-6deg); }
+.dealer-card-stack span:nth-child(3) { transform: translate(-8px, 4px) rotate(-12deg); }
+
+.table-dealer.is-dealing img { animation: dealer-nod 620ms ease-in-out 2; }
+.table-dealer.is-dealing .dealer-card-stack { animation: dealer-hand 520ms ease-in-out 2; }
+
+@keyframes dealer-nod {
+  45% { transform: translateY(2px) rotate(-1deg); }
+}
+
+@keyframes dealer-hand {
+  45% { transform: translate(14px, 12px) rotate(25deg); }
+}
+
+.deal-animation-layer {
+  position: absolute;
+  z-index: 9;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.flying-card {
+  --deal-x: 0px;
+  --deal-y: 190px;
+  --deal-rotate: 0deg;
+  --deal-tilt: 0deg;
+  --deal-delay: 0ms;
+  position: absolute;
+  left: 50%;
+  top: 92px;
+  width: 27px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #f3ded0;
+  border-radius: 4px;
+  background: #c95a45;
+  color: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 5px 10px rgba(34, 21, 18, 0.25);
+  font: 800 5px/1 serif;
+  opacity: 0;
+  animation: dealer-card-flight 650ms var(--deal-delay) both cubic-bezier(0.18, 0.78, 0.2, 1);
+}
+
+.flying-card span {
+  width: 19px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 2px;
+}
+
+.deal-to-seat-bottom-right { --deal-x: 245px; --deal-y: 355px; --deal-rotate: 10deg; }
+.deal-to-seat-right { --deal-x: 360px; --deal-y: 210px; --deal-rotate: 18deg; }
+.deal-to-seat-top-right { --deal-x: 235px; --deal-y: 18px; --deal-rotate: 8deg; }
+.deal-to-seat-top-left { --deal-x: -235px; --deal-y: 18px; --deal-rotate: -8deg; }
+.deal-to-seat-left { --deal-x: -360px; --deal-y: 210px; --deal-rotate: -18deg; }
+.deal-to-seat-bottom-left { --deal-x: -245px; --deal-y: 355px; --deal-rotate: -10deg; }
+.deal-to-hero { --deal-x: 0px; --deal-y: 445px; --deal-rotate: 3deg; }
+.deal-to-board-0 { --deal-x: -112px; --deal-y: 190px; --deal-rotate: -4deg; }
+.deal-to-board-1 { --deal-x: -56px; --deal-y: 190px; --deal-rotate: -2deg; }
+.deal-to-board-2 { --deal-x: 0px; --deal-y: 190px; --deal-rotate: 0deg; }
+.deal-to-board-3 { --deal-x: 56px; --deal-y: 190px; --deal-rotate: 2deg; }
+.deal-to-board-4 { --deal-x: 112px; --deal-y: 190px; --deal-rotate: 4deg; }
+
+@keyframes dealer-card-flight {
+  0% { opacity: 0; transform: translate(-50%, 0) scale(0.55) rotate(-16deg); }
+  16% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--deal-x)), var(--deal-y)) scale(0.9) rotate(calc(var(--deal-rotate) + var(--deal-tilt))); }
 }
 
 .ambient-copy {
@@ -1410,6 +1571,121 @@ select:focus-visible {
 
 .rules-card { width: min(100%, 520px); }
 
+.dealer-settings-card {
+  width: min(100%, 650px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+}
+
+.dealer-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.dealer-choice-grid button {
+  position: relative;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 7px;
+  background: #faf6f0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dealer-choice-grid button:hover,
+.dealer-choice-grid button.selected {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 2px rgba(237, 112, 84, 0.14);
+}
+
+.dealer-choice-grid button:disabled { cursor: wait; opacity: 0.6; }
+
+.dealer-choice-grid img {
+  width: 100%;
+  aspect-ratio: 1 / 1.08;
+  border-radius: 8px;
+  object-fit: cover;
+  object-position: center top;
+  background: #5687e4;
+}
+
+.dealer-choice-grid button > span { display: grid; }
+.dealer-choice-grid b { font-size: 10px; }
+.dealer-choice-grid small { color: var(--muted); font-size: 7px; }
+
+.dealer-choice-grid button > i {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--coral);
+  color: white;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.custom-dealer-upload {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 11px;
+  align-items: center;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px dashed #cdbfb3;
+  border-radius: 12px;
+  background: #f8f3ec;
+}
+
+.custom-dealer-upload > img,
+.upload-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 10px;
+  object-fit: cover;
+  object-position: center top;
+}
+
+.upload-placeholder {
+  display: grid;
+  place-items: center;
+  background: #e8ded3;
+  color: #867870;
+  font-size: 22px;
+}
+
+.custom-dealer-upload > span:nth-child(2) { display: grid; gap: 3px; }
+.custom-dealer-upload b { font-size: 10px; }
+.custom-dealer-upload small { color: var(--muted); font-size: 8px; }
+
+.custom-dealer-upload label {
+  padding: 8px 11px;
+  border-radius: 8px;
+  background: var(--espresso);
+  color: white;
+  font-size: 9px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.custom-dealer-upload input { display: none; }
+.use-custom-dealer { width: 100%; margin-top: 12px; }
+
+.dealer-privacy-note {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 8px;
+}
+
 .rule-list {
   display: grid;
   gap: 9px;
@@ -1763,6 +2039,15 @@ select:focus-visible {
     min-width: 630px;
     transform: scale(0.78);
   }
+  .table-dealer { top: 14px; }
+  .table-dealer img { width: 68px; height: 84px; }
+  .flying-card { top: 82px; }
+  .deal-to-seat-bottom-right { --deal-x: 195px; --deal-y: 310px; }
+  .deal-to-seat-right { --deal-x: 245px; --deal-y: 185px; }
+  .deal-to-seat-top-right { --deal-x: 175px; --deal-y: 16px; }
+  .deal-to-seat-top-left { --deal-x: -175px; --deal-y: 16px; }
+  .deal-to-seat-left { --deal-x: -245px; --deal-y: 185px; }
+  .deal-to-hero { --deal-y: 365px; }
   .action-dock {
     padding: 13px 12px 17px;
     grid-template-columns: 1fr;
@@ -1793,6 +2078,27 @@ select:focus-visible {
   .more-button { width: 34px; height: 34px; }
   .poker-room { min-height: 460px; }
   .poker-table { transform: scale(0.63); }
+  .dealer-settings-button { display: none; }
+  .table-dealer { top: 20px; }
+  .table-dealer img { width: 58px; height: 72px; }
+  .table-dealer > button > span { bottom: -14px; min-width: 80px; }
+  .flying-card { top: 78px; width: 23px; height: 33px; }
+  .deal-to-seat-bottom-right { --deal-x: 155px; --deal-y: 255px; }
+  .deal-to-seat-right { --deal-x: 195px; --deal-y: 150px; }
+  .deal-to-seat-top-right { --deal-x: 140px; --deal-y: 10px; }
+  .deal-to-seat-top-left { --deal-x: -140px; --deal-y: 10px; }
+  .deal-to-seat-left { --deal-x: -195px; --deal-y: 150px; }
+  .deal-to-hero { --deal-y: 300px; }
+  .deal-to-board-0 { --deal-x: -72px; --deal-y: 145px; }
+  .deal-to-board-1 { --deal-x: -36px; --deal-y: 145px; }
+  .deal-to-board-2 { --deal-x: 0px; --deal-y: 145px; }
+  .deal-to-board-3 { --deal-x: 36px; --deal-y: 145px; }
+  .deal-to-board-4 { --deal-x: 72px; --deal-y: 145px; }
+  .dealer-choice-grid { grid-template-columns: repeat(2, 1fr); }
+  .custom-dealer-upload { grid-template-columns: 50px 1fr; }
+  .custom-dealer-upload > img,
+  .upload-placeholder { width: 50px; height: 50px; }
+  .custom-dealer-upload label { grid-column: 1 / 3; text-align: center; }
   .turn-banner { padding-left: 12px; padding-right: 12px; }
   .turn-banner > div:first-child { display: grid; gap: 2px; }
   .turn-label { font-size: 14px; }

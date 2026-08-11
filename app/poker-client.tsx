@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AuthenticatedUser,
   CardCode,
@@ -10,6 +10,7 @@ import type {
   Suit,
 } from "../lib/poker-types";
 import { potFractionRaiseTarget } from "../lib/bet-sizing";
+import { DEALER_PRESETS } from "../lib/dealer-options";
 
 type ClientProps = {
   user: AuthenticatedUser;
@@ -31,6 +32,13 @@ const phaseName = {
 
 const seatColors = ["#ef7658", "#8ca98d", "#d2a7aa", "#809bb1", "#b99c72", "#d89066"];
 const relativeSeats = ["", "seat-bottom-right", "seat-right", "seat-top-right", "seat-top-left", "seat-left"];
+
+type DealBurst = {
+  id: string;
+  kind: "hole" | "board";
+  count: number;
+  startIndex: number;
+};
 
 function initials(name: string) {
   const trimmed = name.trim();
@@ -94,6 +102,67 @@ function PlayerSeat({ player, position, dealer, active, phase }: {
   );
 }
 
+function DealAnimation({ burst, positions }: { burst: DealBurst | null; positions: string[] }) {
+  if (!burst) return null;
+  if (burst.kind === "board") {
+    return (
+      <div className="deal-animation-layer" aria-hidden="true">
+        {Array.from({ length: burst.count }, (_, index) => {
+          const boardIndex = Math.min(4, burst.startIndex + index);
+          return <i key={`${burst.id}-${index}`} className={`flying-card deal-to-board-${boardIndex}`} style={{ "--deal-delay": `${index * 115}ms` } as CSSProperties}><span>同桌</span></i>;
+        })}
+      </div>
+    );
+  }
+
+  const targets = [...positions, "hero"];
+  return (
+    <div className="deal-animation-layer" aria-hidden="true">
+      {targets.flatMap((target, targetIndex) => Array.from({ length: 2 }, (_, cardIndex) => {
+        const dealIndex = targetIndex * 2 + cardIndex;
+        return <i key={`${burst.id}-${target}-${cardIndex}`} className={`flying-card deal-to-${target}`} style={{ "--deal-delay": `${dealIndex * 78}ms`, "--deal-tilt": `${cardIndex ? 7 : -7}deg` } as CSSProperties}><span>同桌</span></i>;
+      }))}
+    </div>
+  );
+}
+
+async function prepareDealerPhoto(file: File) {
+  if (!file.type.startsWith("image/")) throw new Error("请选择一张照片");
+  if (file.size > 8 * 1024 * 1024) throw new Error("原始照片不能超过 8MB");
+  const source = URL.createObjectURL(file);
+  try {
+    const image = document.createElement("img");
+    image.src = source;
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("无法读取这张照片"));
+    });
+    const size = 480;
+    const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
+    const sourceWidth = size / scale;
+    const sourceHeight = size / scale;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("浏览器无法处理这张照片");
+    context.drawImage(
+      image,
+      (image.naturalWidth - sourceWidth) / 2,
+      (image.naturalHeight - sourceHeight) / 2,
+      sourceWidth,
+      sourceHeight,
+      0,
+      0,
+      size,
+      size,
+    );
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } finally {
+    URL.revokeObjectURL(source);
+  }
+}
+
 async function apiRequest(path: string, init?: RequestInit) {
   const response = await fetch(path, {
     ...init,
@@ -120,11 +189,16 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const [joinCode, setJoinCode] = useState(initialRoomCode ?? "");
   const [showRules, setShowRules] = useState(false);
   const [showRebuy, setShowRebuy] = useState(false);
+  const [showDealerSettings, setShowDealerSettings] = useState(false);
+  const [customDealerPreview, setCustomDealerPreview] = useState("");
+  const [dealerPhotoBusy, setDealerPhotoBusy] = useState(false);
   const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [message, setMessage] = useState("");
   const [raiseAmount, setRaiseAmount] = useState(0);
   const [now, setNow] = useState(Date.now());
+  const [dealBurst, setDealBurst] = useState<DealBurst | null>(null);
   const polling = useRef(false);
+  const previousDealState = useRef<{ handNumber: number; boardCount: number } | null>(null);
 
   const notify = useCallback((text: string) => {
     setToast(text);
@@ -169,6 +243,23 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   useEffect(() => {
     if (game?.validActions.canRaise) setRaiseAmount(game.validActions.minRaiseTo);
   }, [game?.version, game?.validActions.canRaise, game?.validActions.minRaiseTo]);
+
+  useEffect(() => {
+    if (!game) return;
+    const previous = previousDealState.current;
+    const current = { handNumber: game.handNumber, boardCount: game.board.length };
+    previousDealState.current = current;
+    let burst: DealBurst | null = null;
+    if ((!previous || previous.handNumber !== current.handNumber) && game.handNumber > 0 && !["waiting", "showdown"].includes(game.phase)) {
+      burst = { id: `hand-${game.handNumber}-${Date.now()}`, kind: "hole", count: 2, startIndex: 0 };
+    } else if (previous && previous.handNumber === current.handNumber && current.boardCount > previous.boardCount) {
+      burst = { id: `board-${game.handNumber}-${current.boardCount}-${Date.now()}`, kind: "board", count: current.boardCount - previous.boardCount, startIndex: previous.boardCount };
+    }
+    if (!burst) return;
+    setDealBurst(burst);
+    const finish = window.setTimeout(() => setDealBurst(null), 1_450);
+    return () => window.clearTimeout(finish);
+  }, [game?.handNumber, game?.board.length]);
 
   async function createOrJoin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -260,6 +351,42 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     } catch (manageError) {
       setError(manageError instanceof Error ? manageError.message : "房间操作失败");
     } finally { setPending(false); }
+  }
+
+  function openDealerSettings() {
+    if (!game || game.room.ownerId !== user.id) return;
+    setCustomDealerPreview(game.dealer.isCustom ? game.dealer.image : "");
+    setShowDealerSettings(true);
+  }
+
+  async function chooseDealer(presetId: string, image?: string) {
+    if (!game || pending) return;
+    setPending(true);
+    setError("");
+    try {
+      const data = await apiRequest("/api/game", {
+        method: "POST",
+        body: JSON.stringify({ code: game.room.code, type: "set_dealer", dealer: { presetId, image } }),
+      });
+      if (data.game) setGame(data.game);
+      setShowDealerSettings(false);
+      notify(presetId === "custom" ? "自定义荷官已上桌" : "荷官已更换");
+    } catch (dealerError) {
+      setError(dealerError instanceof Error ? dealerError.message : "更换荷官失败");
+    } finally { setPending(false); }
+  }
+
+  async function handleDealerPhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setDealerPhotoBusy(true);
+    setError("");
+    try {
+      setCustomDealerPreview(await prepareDealerPhoto(file));
+    } catch (photoError) {
+      setError(photoError instanceof Error ? photoError.message : "照片处理失败");
+    } finally { setDealerPhotoBusy(false); }
   }
 
   function kick(target: PublicPlayer) {
@@ -368,9 +495,10 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
           <button className="nav-item" type="button" onClick={() => { setLobbyMode("join"); setJoinCode(""); setError(""); setView("lobby"); }}>加入房间</button>
           <button className="nav-item" type="button" onClick={() => setShowRules(true)}>规则</button>
         </nav>
-        <div className="topbar-actions">
-          <span className="server-badge"><i /> 服务器已同步</span>
-          <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
+          <div className="topbar-actions">
+            <span className="server-badge"><i /> 服务器已同步</span>
+            {game.room.ownerId === user.id && <button className="dealer-settings-button" type="button" onClick={openDealerSettings}>♣ 荷官</button>}
+            <button className="chip-button" type="button" onClick={() => setShowRebuy(true)}>◉ 补码</button>
           <button className="invite-button" type="button" onClick={copyInvite}>＋ 邀请同学</button>
           <span className="my-avatar" title={user.displayName}>{initials(user.displayName)}</span>
         </div>
@@ -397,6 +525,14 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
 
           <div className="poker-room">
             <div className="ambient-copy ambient-left">SERVER SHUFFLED</div><div className="ambient-copy ambient-right">LIVE TABLE</div>
+            <div className={`table-dealer ${dealBurst ? "is-dealing" : ""}`}>
+              <button type="button" onClick={openDealerSettings} disabled={game.room.ownerId !== user.id} aria-label={game.room.ownerId === user.id ? "更换荷官" : `荷官 ${game.dealer.name}`}>
+                <img src={game.dealer.image} alt={`${game.dealer.name}荷官`} />
+                <span><b>{game.dealer.name}</b><small>{game.room.ownerId === user.id ? "点击更换" : "本桌荷官"}</small></span>
+              </button>
+              <i className="dealer-card-stack" aria-hidden="true"><span /><span /><span /></i>
+            </div>
+            <DealAnimation burst={dealBurst} positions={positionedPlayers.filter((item) => item.player && !item.player.folded).map((item) => item.position)} />
             <div className="table-shadow" />
             <div className="poker-table">
               <div className="table-rail" /><div className="felt-texture" /><div className="table-brand"><span>同桌</span><small>FAIR PLAY</small></div>
@@ -458,6 +594,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
       <button className="mobile-panel-toggle" type="button" onClick={() => setShowMobilePanel(!showMobilePanel)}>{showMobilePanel ? "收起动态" : "房间动态"}</button>
 
       {showRules && <div className="modal-backdrop" onMouseDown={() => setShowRules(false)}><section className="modal-card rules-card" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowRules(false)}>×</button><span className="modal-kicker">正常德州规则</span><h2>这次，牌局是真的</h2><div className="rule-list"><div><b>01</b><span><strong>服务器安全洗牌</strong><small>每手使用加密随机数重新洗 52 张牌，前端拿不到牌堆。</small></span></div><div><b>02</b><span><strong>严格轮流行动</strong><small>过牌、跟注、加注、全下和超时均由服务器验证。</small></span></div><div><b>03</b><span><strong>自动结算边池</strong><small>支持平分底池、全下边池与七选五最佳牌型。</small></span></div></div><button className="primary-action" type="button" onClick={() => setShowRules(false)}>回到牌桌</button></section></div>}
+      {showDealerSettings && <div className="modal-backdrop" onMouseDown={() => setShowDealerSettings(false)}><section className="modal-card dealer-settings-card" role="dialog" aria-modal="true" aria-labelledby="dealer-settings-title" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowDealerSettings(false)}>×</button><span className="modal-kicker">DEALER SELECT</span><h2 id="dealer-settings-title">选择本桌荷官</h2><p>只有房主可以更换，所有玩家会实时看到同一位荷官。</p><div className="dealer-choice-grid">{DEALER_PRESETS.map((dealer) => <button className={game.dealer.id === dealer.id ? "selected" : ""} type="button" key={dealer.id} onClick={() => chooseDealer(dealer.id)} disabled={pending}><img src={dealer.image} alt="" /><span><b>{dealer.name}</b><small>{dealer.id === "classmate" ? "你的默认照片" : "内置人物"}</small></span>{game.dealer.id === dealer.id && <i>✓</i>}</button>)}</div><div className="custom-dealer-upload">{customDealerPreview ? <img src={customDealerPreview} alt="自定义荷官预览" /> : <span className="upload-placeholder">＋</span>}<span><b>使用自己的照片</b><small>自动裁成头像，仅保存到当前房间</small></span><label>{dealerPhotoBusy ? "处理中…" : "选择照片"}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleDealerPhoto} disabled={dealerPhotoBusy || pending} /></label></div>{customDealerPreview && <button className="primary-action use-custom-dealer" type="button" onClick={() => chooseDealer("custom", customDealerPreview)} disabled={pending || dealerPhotoBusy}>{pending ? "正在同步…" : "使用这张照片"}</button>}<small className="dealer-privacy-note">照片会压缩后同步给本房间的玩家，请使用已获授权的图片。</small></section></div>}
       {showRebuy && <div className="modal-backdrop" onMouseDown={() => setShowRebuy(false)}><section className="modal-card rebuy-card" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><button className="modal-close" type="button" onClick={() => setShowRebuy(false)}>×</button><span className="modal-kicker">REBUY</span><h2>补充桌面筹码</h2><p>牌局进行中提交的筹码会在下一手开始前到账，不会影响当前底池。</p><div className="rebuy-balance"><span>当前筹码</span><b>{viewer?.chips.toLocaleString() ?? 0}</b>{viewer?.pendingRebuy ? <small>已预约 +{viewer.pendingRebuy.toLocaleString()}</small> : <small>本桌上限 {(game.room.startingChips * 5).toLocaleString()}</small>}</div><div className="rebuy-options"><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: 1000 })}>+1,000</button><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: 3000 })}>+3,000</button><button type="button" disabled={pending} onClick={() => manageRoom("rebuy", { amount: game.room.startingChips })}>+{game.room.startingChips.toLocaleString()}</button></div><small className="rebuy-note">娱乐积分，无充值与提现</small></section></div>}
       {toast && <div className="toast" role="status">✓ {toast}</div>}
     </main>

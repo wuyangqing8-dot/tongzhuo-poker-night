@@ -8,6 +8,7 @@ import type {
   Rank,
   Suit,
 } from "./poker-types";
+import { DEALER_PRESETS, DEFAULT_DEALER } from "./dealer-options";
 
 const ranks: Rank[] = ["2", "3", "4", "5", "6", "7", "8", "9", "T", "J", "Q", "K", "A"];
 const suits: Suit[] = ["S", "H", "D", "C"];
@@ -543,6 +544,7 @@ export function toPublicView(state: PokerGameState, viewerId: string): PublicGam
     actionDeadline: state.actionDeadline,
     nextHandAt: state.nextHandAt,
     resultText: state.resultText,
+    dealer: state.dealer ?? DEFAULT_DEALER,
   };
 }
 
@@ -626,6 +628,7 @@ export function createInitialState(input: {
     nextHandAt: null,
     lastPot: 0,
     resultText: "",
+    dealer: { ...DEFAULT_DEALER },
     createdAt: now,
     updatedAt: now,
   };
@@ -749,4 +752,28 @@ export function kickPlayer(state: PokerGameState, actorId: string, targetId: str
   }
   state.updatedAt = Date.now();
   return target;
+}
+
+export function setDealerProfile(
+  state: PokerGameState,
+  actorId: string,
+  input: { presetId?: string; image?: string },
+) {
+  if (state.ownerId !== actorId) throw new Error("只有房主可以更换荷官");
+  const preset = DEALER_PRESETS.find((item) => item.id === input.presetId);
+  if (preset) {
+    state.dealer = { ...preset };
+  } else if (input.presetId === "custom") {
+    const image = input.image ?? "";
+    if (!/^data:image\/(?:jpeg|png|webp);base64,[a-zA-Z0-9+/=]+$/.test(image)) {
+      throw new Error("请选择 JPG、PNG 或 WebP 照片");
+    }
+    if (image.length > 500_000) throw new Error("荷官照片处理后仍然太大");
+    state.dealer = { id: "custom", name: "房主自定义", image, isCustom: true };
+  } else {
+    throw new Error("没有这个荷官人物");
+  }
+  addLog(state, `房主将荷官更换为 ${state.dealer.name}`, "system");
+  state.updatedAt = Date.now();
+  return state.dealer;
 }
