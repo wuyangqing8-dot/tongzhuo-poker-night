@@ -2376,19 +2376,32 @@ select:focus-visible {
   .game-error { width: calc(100% - 28px); }
   .table-panel { border-left: 0; border-right: 0; border-radius: 0; }
   .poker-room {
-    min-height: 525px;
-    padding: 48px 0 150px;
+    min-height: 500px;
+    padding: 44px 0 104px;
     overflow: hidden;
   }
   .poker-room::before { inset: 12px; }
+  /* No transform:scale on mobile — it shrank ALL text to unreadable sizes.
+     Table is viewport-width; seats are pulled onto the rim so nothing overflows. */
   .poker-table {
-    width: 630px;
-    min-width: 630px;
-    transform: scale(0.78);
+    width: 94vw;
+    min-width: 0;
+    transform: none;
   }
-  .hero-seat { bottom: -40px; }
-  .table-dealer { top: 14px; }
-  .table-dealer img { width: 68px; height: 84px; }
+  .hero-seat { bottom: -32px; }
+  .table-dealer { top: 12px; }
+  .table-dealer img { width: 66px; height: 82px; }
+  .seat-top-left { top: 6px; left: 11%; }
+  .seat-top-right { top: 6px; right: 11%; }
+  .seat-left { left: 6px; top: 47%; transform: translateY(-50%); }
+  .seat-right { right: 6px; top: 47%; transform: translateY(-50%); }
+  .seat-bottom-left { left: 9%; bottom: 6px; }
+  .seat-bottom-right { right: 9%; bottom: 6px; }
+  .player-seat { min-width: 88px; padding: 5px 8px 5px 36px; }
+  .avatar { width: 34px; height: 34px; font-size: 9px; }
+  .avatar-wrap { left: -6px; }
+  .player-name { font-size: 10px; }
+  .player-chips { font-size: 8px; }
   .flying-card { top: 82px; }
   .deal-to-seat-bottom-right { --deal-x: 195px; --deal-y: 310px; }
   .deal-to-seat-right { --deal-x: 245px; --deal-y: 185px; }
@@ -2408,8 +2421,9 @@ select:focus-visible {
   }
   .hand-summary b { font-size: 16px; }
   .hand-summary small { text-align: right; }
-  .action-buttons { grid-template-columns: repeat(2, 1fr); }
-  .action-button { min-height: 48px; }
+  .action-buttons { grid-template-columns: repeat(2, 1fr); gap: 9px; }
+  .action-button { min-height: 54px; font-size: 13px; }
+  .action-button b { font-size: 14px; }
   .raise-control { grid-column: 1; }
   .pot-presets { grid-column: 1; }
   .precise-pot-control { grid-column: 1; }
@@ -2430,17 +2444,28 @@ select:focus-visible {
   .table-display-switches { display: grid; gap: 4px; }
   .gto-switch { min-height: 25px; }
   .more-button { width: 34px; height: 34px; }
-  .poker-room { min-height: 460px; }
-  .poker-table { transform: scale(0.63); }
-  .hero-seat { bottom: -34px; }
+  .poker-room { min-height: 440px; padding: 38px 0 92px; }
+  .poker-table { width: 96vw; }
+  .hero-seat { bottom: -28px; }
   .dealer-settings-button { display: none; }
   .pause-table-button { min-height: 32px; padding: 0 9px; font-size: 9px; }
   .table-paused-overlay { padding: 90px 18px 55px; }
   .table-paused-overlay > span { width: 55px; height: 55px; font-size: 24px; }
   .table-paused-overlay b { font-size: 20px; }
-  .table-dealer { top: 20px; }
-  .table-dealer img { width: 58px; height: 72px; }
+  .table-dealer { top: 16px; }
+  .table-dealer img { width: 56px; height: 70px; }
   .table-dealer > button > span { bottom: -14px; min-width: 80px; }
+  .seat-top-left { top: 4px; left: 9%; }
+  .seat-top-right { top: 4px; right: 9%; }
+  .seat-left { left: 4px; top: 47%; transform: translateY(-50%); }
+  .seat-right { right: 4px; top: 47%; transform: translateY(-50%); }
+  .seat-bottom-left { left: 7%; bottom: 4px; }
+  .seat-bottom-right { right: 7%; bottom: 4px; }
+  .player-seat { min-width: 76px; padding: 4px 6px 4px 30px; }
+  .avatar { width: 30px; height: 30px; font-size: 8px; }
+  .avatar-wrap { left: -5px; }
+  .player-name { font-size: 9px; }
+  .player-chips { font-size: 7px; }
   .flying-card { top: 78px; width: 23px; height: 33px; }
   .deal-to-seat-bottom-right { --deal-x: 155px; --deal-y: 255px; }
   .deal-to-seat-right { --deal-x: 195px; --deal-y: 150px; }
