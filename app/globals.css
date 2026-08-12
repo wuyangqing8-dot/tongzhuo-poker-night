@@ -1728,6 +1728,21 @@ select:focus-visible {
   cursor: pointer;
 }
 
+.log-card-head {
+  width: 100%;
+  margin: 0;
+  border-top: 0;
+  border-left: 0;
+  border-right: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.log-card-head:hover { background: rgba(0, 0, 0, 0.04); }
+
 .mini-player-list {
   padding: 6px;
   display: grid;
