@@ -719,7 +719,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
     const next = !showGto;
     window.localStorage.setItem("tongzhuo-gto-advisor", next ? "on" : "off");
     setShowGto(next);
-    if (next && typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 980px)").matches) {
+    if (next && typeof window !== "undefined" && window.matchMedia && window.matchMedia("(max-width: 760px)").matches) {
       setShowMobilePanel(true);
     }
   }
@@ -879,6 +879,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
 
         <div className="panel-resizer" role="separator" aria-orientation="vertical" aria-label="拖动调节右侧信息栏宽度" onPointerDown={startResize} />
 
+        {showMobilePanel && <div className="panel-backdrop" onClick={() => setShowMobilePanel(false)} aria-hidden="true" />}
         <aside className={`side-panel ${showMobilePanel ? "mobile-panel-open" : ""}`}>
           <div className="side-tabs"><button className="active" type="button">房间动态</button><button type="button">第 {game.handNumber} 手</button></div>
           <div className="players-card">

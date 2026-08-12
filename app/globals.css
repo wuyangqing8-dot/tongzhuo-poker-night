@@ -502,7 +502,7 @@ select:focus-visible {
 .panel-resizer.dragging::after {
   opacity: 0.4;
 }
-@media (min-width: 981px) {
+@media (min-width: 761px) {
   .panel-resizer { display: block; }
 }
 
@@ -2461,31 +2461,9 @@ select:focus-visible {
   .brand-word { font-size: 19px; }
   .brand-note { display: none; }
   .main-nav { display: none; }
-  .game-layout { grid-template-columns: 1fr; }
-  .side-panel {
-    display: none;
-    grid-template-columns: 1fr 1fr;
-  }
-  .side-panel.mobile-panel-open { display: grid; }
-  .side-tabs { grid-column: 1 / 3; }
-  .leave-room { grid-column: 1 / 3; }
-  .chat-card { min-height: 300px; }
-  .mobile-panel-toggle {
-    display: block;
-    position: fixed;
-    z-index: 30;
-    right: 16px;
-    bottom: 15px;
-    border: 0;
-    border-radius: 999px;
-    padding: 11px 16px;
-    background: var(--espresso);
-    color: white;
-    font-size: 10px;
-    font-weight: 800;
-    box-shadow: 0 8px 22px rgba(40, 29, 25, 0.25);
-  }
-  .poker-table { min-width: 630px; width: 75%; }
+  .game-layout { grid-template-columns: minmax(0, 1fr) var(--side-w, 280px); }
+  .chat-card { min-height: 260px; }
+  .poker-table { width: 100%; min-width: 0; }
 }
 
 @media (max-width: 760px) {
@@ -2496,7 +2474,7 @@ select:focus-visible {
   .game-heading h1 { font-size: 28px; }
   .room-tools { align-self: flex-start; }
   .safe-play { display: none; }
-  .game-layout { padding: 0 0 86px; }
+  .game-layout { padding: 0 0 86px; grid-template-columns: 1fr; }
   .game-error { width: calc(100% - 28px); }
   .table-panel { border-left: 0; border-right: 0; border-radius: 0; }
   .poker-room {
@@ -2556,9 +2534,45 @@ select:focus-visible {
   .pot-presets { grid-column: 1; }
   .precise-pot-control { grid-column: 1; }
   .gto-advisor { grid-column: 1; }
-  .side-panel.mobile-panel-open {
+  .side-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    width: min(86vw, 340px);
     display: flex;
-    margin: 0 12px;
+    flex-direction: column;
+    gap: 12px;
+    padding: 56px 14px 20px;
+    background: var(--page-bg, #f1e9df);
+    box-shadow: -12px 0 30px rgba(20, 15, 12, 0.22);
+    transform: translateX(100%);
+    transition: transform 0.26s ease;
+    overflow-y: auto;
+  }
+  .side-panel.mobile-panel-open { transform: translateX(0); }
+  .panel-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: rgba(20, 15, 12, 0.42);
+  }
+  .panel-resizer { display: none; }
+  .mobile-panel-toggle {
+    display: block;
+    position: fixed;
+    z-index: 30;
+    right: 16px;
+    bottom: 15px;
+    border: 0;
+    border-radius: 999px;
+    padding: 11px 16px;
+    background: var(--espresso);
+    color: white;
+    font-size: 10px;
+    font-weight: 800;
+    box-shadow: 0 8px 22px rgba(40, 29, 25, 0.25);
   }
   .side-tabs, .leave-room { grid-column: auto; }
 }
