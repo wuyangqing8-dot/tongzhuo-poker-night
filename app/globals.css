@@ -932,10 +932,9 @@ select:focus-visible {
   position: absolute;
   z-index: 5;
   left: 50%;
-  bottom: 16px;
+  top: calc(100% + 14px);
   transform: translateX(-50%);
-  width: min(64%, 380px);
-  max-height: 168px;
+  width: min(360px, 72vw);
   display: flex;
   flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.16);
@@ -952,14 +951,24 @@ select:focus-visible {
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  margin: 0;
   padding: 7px 12px;
+  border: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.table-log-head span { font: 800 10px/1 Georgia, serif; letter-spacing: .04em; }
-.table-log-head small { color: #9fc2b4; font-size: 7px; }
+.table-log-head:hover { background: rgba(255, 255, 255, 0.06); }
 
-.table-log-list { padding: 4px 12px 8px; overflow-y: auto; }
+.table-log-head span { font: 800 10px/1 Georgia, serif; letter-spacing: .04em; }
+.table-log-head small { color: #9fc2b4; font-size: 7px; white-space: nowrap; }
+
+.table-log-list { padding: 4px 12px 8px; overflow-y: auto; max-height: 132px; }
 
 .table-log-list p {
   display: grid;
@@ -979,12 +988,14 @@ select:focus-visible {
 .table-log-list time { color: #88a89b; font: 600 7px/1.5 monospace; }
 
 @media (max-width: 760px) {
-  .table-log { width: min(80%, 360px); bottom: 10px; max-height: 132px; }
+  .table-log { width: min(320px, 82vw); top: calc(100% + 10px); }
+  .table-log-list { max-height: 104px; }
   .table-log-list p { font-size: 8px; }
 }
 
 @media (max-width: 520px) {
-  .table-log { width: min(88%, 320px); bottom: 8px; max-height: 116px; }
+  .table-log { width: min(300px, 88vw); top: calc(100% + 8px); }
+  .table-log-list { max-height: 92px; }
   .table-log-head span { font-size: 9px; }
 }
 

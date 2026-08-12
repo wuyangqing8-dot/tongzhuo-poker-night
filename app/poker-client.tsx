@@ -245,6 +245,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
   const [potPercent, setPotPercent] = useState(50);
   const [amountUnit, setAmountUnit] = useState<AmountUnit>("chips");
   const [showGto, setShowGto] = useState(false);
+  const [logExpanded, setLogExpanded] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [dealBurst, setDealBurst] = useState<DealBurst | null>(null);
   const [partyWheelOpen, setPartyWheelOpen] = useState(false);
@@ -841,7 +842,7 @@ export default function PokerClient({ user, initialRoomCode }: ClientProps) {
                     ? <Card key={`${game.handNumber}-${game.board[index]}`} code={game.board[index]} delay={index * 70} />
                     : <div className="card-placeholder" key={`empty-${index}`} aria-label="尚未发出的公共牌" />)}
                 </div>
-                <div className="table-log" aria-label="行动记录"><div className="table-log-head"><span>行动记录</span><small>服务端同步</small></div><div className="table-log-list">{[...game.logs].reverse().slice(0, 6).map((log) => <p className={log.kind} key={log.id}><time>{new Date(log.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{log.text}</p>)}</div></div>
+                <div className={`table-log ${logExpanded ? "open" : ""}`} aria-label="行动记录"><button type="button" className="table-log-head" onClick={() => setLogExpanded((value) => !value)} aria-expanded={logExpanded}><span>行动记录</span><small>{logExpanded ? "收起 ▴" : `共 ${game.logs.length} 条 · 展开 ▾`}</small></button><div className="table-log-list">{[...game.logs].reverse().slice(0, logExpanded ? 8 : 2).map((log) => <p className={log.kind} key={log.id}><time>{new Date(log.at).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</time>{log.text}</p>)}</div></div>
               </div>
               {positionedPlayers.map((item, index) => <PlayerSeat key={item.player?.id ?? `empty-${index}`} player={item.player} position={item.position} dealer={item.player?.seat === game.dealerSeat} active={item.player?.seat === game.turnSeat} phase={game.phase} amountUnit={amountUnit} bigBlind={game.room.bigBlind} />)}
               {viewer && (
