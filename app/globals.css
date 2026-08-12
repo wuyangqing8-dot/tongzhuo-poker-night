@@ -507,6 +507,13 @@ select:focus-visible {
   .panel-resizer { display: block; }
 }
 
+.panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 39;
+  background: rgba(20, 15, 12, 0.42);
+}
+
 .game-error {
   display: block;
   width: min(calc(100% - 68px), 1512px);
@@ -2601,12 +2608,6 @@ select:focus-visible {
     overflow-y: auto;
   }
   .side-panel.mobile-panel-open { transform: translateX(0); }
-  .panel-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 39;
-    background: rgba(20, 15, 12, 0.42);
-  }
   .panel-resizer { display: none; }
   .mobile-panel-toggle {
     display: block;
