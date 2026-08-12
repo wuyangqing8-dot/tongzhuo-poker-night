@@ -450,15 +450,16 @@ select:focus-visible {
   margin: 0 auto;
   padding: 0 34px 34px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--side-w, 306px);
-  gap: 18px;
+  /* 3 columns: table | resizer (18px drag handle) | side panel.
+     The middle column is the draggable splitter so the side-panel stays on the right
+     instead of wrapping to row 2 below the table. */
+  grid-template-columns: minmax(0, 1fr) 18px var(--side-w, 306px);
+  gap: 0;
 }
 
 /* Draggable splitter between the table and the right info panel (desktop only) */
 .panel-resizer {
   display: none;
-  width: 9px;
-  margin: 0 -4px;
   align-self: stretch;
   cursor: col-resize;
   position: relative;
@@ -2496,7 +2497,7 @@ select:focus-visible {
   .main-nav { margin-left: 4px; }
   .live-pill, .server-badge { display: none; }
   .game-heading { padding-left: 22px; padding-right: 22px; }
-  .game-layout { padding: 0 22px 28px; grid-template-columns: minmax(0, 1fr) var(--side-w, 272px); }
+  .game-layout { padding: 0 22px 28px; grid-template-columns: minmax(0, 1fr) 18px var(--side-w, 272px); }
   .poker-room { min-height: 560px; padding-left: 42px; padding-right: 42px; }
   .poker-table { min-width: 590px; width: 82%; }
   .ambient-copy { display: none; }
@@ -2509,7 +2510,7 @@ select:focus-visible {
   .brand-word { font-size: 19px; }
   .brand-note { display: none; }
   .main-nav { display: none; }
-  .game-layout { grid-template-columns: minmax(0, 1fr) var(--side-w, 280px); }
+  .game-layout { grid-template-columns: minmax(0, 1fr) 18px var(--side-w, 280px); }
   .chat-card { min-height: 260px; }
   .poker-table { width: 100%; min-width: 0; }
 }
